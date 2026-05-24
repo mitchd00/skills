@@ -1,0 +1,33 @@
+[project]
+name = "batch-property-intelligence"
+version = "1.2.0"
+description = "Batch property research tool for Elite Lifestyle Properties — Intelligence Hub: watches a folder for RP Data CSVs, accumulates an SQLite history, and regenerates a master Excel + HTML dashboard on every drop."
+readme = "README.md"
+authors = [
+    {name = "Mitchell Dunne — Elite Lifestyle Properties"}
+]
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.0",
+    "openpyxl>=3.1",
+    "xlsxwriter>=3.1",
+    "click>=8.1",
+    "pyyaml>=6.0",
+    "jinja2>=3.1",
+    "rich>=13.0",
+    "watchdog>=4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "pyinstaller>=6.0",
+]
+
+[project.scripts]
+bpi = "src.main:cli"
+bpi-launcher = "src.launcher.app:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,98 @@
+# Scoring weights for batch-property-intelligence
+# Tune these without changing code. Reloaded on every run.
+
+# Sunshine Coast postcodes — properties in these postcodes count toward SC portfolio
+sc_postcodes:
+  - 4551
+  - 4575
+  - 4556  # Buderim — borderline, included for portfolio counting
+  - 4557  # Mooloolaba — borderline, included
+  - 4558  # Maroochydore — borderline, included
+  - 4573  # Coolum — borderline, included
+  - 4566  # Noosa Heads — separate market but still SC
+
+# Long-held threshold (years since last sale) — affects Seller Lead scoring on single-property owners
+long_held_years: 15
+
+# Recent purchase threshold (years since last sale) — disqualifies as Seller Lead
+recent_purchase_years: 5
+
+# Entity name patterns — owner names containing any of these classify as Entity
+entity_patterns:
+  - "PTY LTD"
+  - "PTY. LTD"
+  - "LIMITED"
+  - " LTD"
+  - "TRUST"
+  - "SUPER"
+  - "SUPERANNUATION"
+  - "SMSF"
+  - "NOMINEES"
+  - "HOLDINGS"
+  - "INVESTMENTS"
+  - "PROPERTIES"
+  - " GROUP"
+  - " CO."
+  - " & CO"
+  - "PARTNERSHIP"
+  - "CORPORATION"
+  - "ENTERPRISES"
+
+# Non-saleable owner patterns — properties owned by these are filtered out of lead lists
+non_saleable_patterns:
+  - "RESERVE FOR"
+  - "SUNSHINE COAST REGIONAL COUNCIL"
+  - "SUNSHINE COAST COUNCIL"
+  - "STATE OF QUEENSLAND"
+  - "DEPARTMENT OF"
+  - "COMMONWEALTH OF AUSTRALIA"
+  - "CROWN LAND"
+  - "QUEENSLAND RAIL"
+  - "ENERGEX"
+  - "TELSTRA CORPORATION"
+  - "AUSTRALIA POST"
+  # Aged care, community housing, religious, and similar institutional owners
+  - "OZCARE"
+  - "BLUECARE"
+  - "ANGLICARE"
+  - "UNITINGCARE"
+  - "MERCY AGED"
+  - "SOUTHERN CROSS CARE"
+  - "REGIS AGED CARE"
+  - "BUPA AGED"
+  - "OPAL AGED"
+  - "RSL CARE"
+  - "MASONIC CARE"
+  - "TRICARE"
+  - "ESTIA HEALTH"
+  - "COAST2BAY HOUSING"
+  - "COMMUNITY HOUSING"
+  - "HOUSING GROUP LIMITED"
+  - "HOUSING TRUST"
+  - "CHURCH OF"
+  - "ARCHDIOCESE OF"
+  - "DIOCESE OF"
+  - "TRUSTEES OF THE"
+  - "SALVATION ARMY"
+  - "ANGLICAN CHURCH"
+  - "CATHOLIC CHURCH"
+
+# Non-saleable land use patterns — properties with these land uses are filtered out
+non_saleable_land_uses:
+  - "Reserves"
+  - "Recreational"
+  - "Public Buildings"
+  - "Educational - Govt"
+  - "Roads"
+  - "Drainage"
+  - "Cemetery"
+
+# ELP branding (matches cma-builder)
+brand:
+  elite_black: "0A0A0A"
+  warm_white: "F7F4EE"
+  soft_charcoal: "2A2A2A"
+  muted_gold: "B8965A"
+  font_body: "Arial"
+  font_size_body: 10
+  font_size_header: 11
