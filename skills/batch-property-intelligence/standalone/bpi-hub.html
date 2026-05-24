@@ -69,6 +69,9 @@
 
   .dbstat { font-size: 12px; color: var(--soft-charcoal); margin-left: auto; }
   .dbstat b { color: var(--elite-black); }
+  .memchip { font-size: 12px; padding: 5px 10px; border-radius: 4px; background: #efeae0; color: var(--soft-charcoal); }
+  .memchip.linked { background: var(--muted-gold); color: #fff; font-weight: 600; }
+  .memchip.warn { background: #f3e2c2; color: #7a5e1f; font-weight: 600; }
 
   .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0; }
   .stat { background: #fff; padding: 16px; border-left: 3px solid var(--muted-gold); }
@@ -142,6 +145,15 @@
     <button id="exportAllBtn">Export All (CSV)</button>
     <button class="danger" id="clearBtn">Clear database</button>
     <div class="dbstat" id="dbstat">Database empty</div>
+  </div>
+
+  <div class="toolbar" id="memBar">
+    <span class="memchip" id="memStatus">Memory: browser-only</span>
+    <button id="linkFileBtn">Link OneDrive memory file…</button>
+    <button id="reconnectBtn" style="display:none;">Reconnect memory file</button>
+    <button id="saveCopyBtn">Save a copy…</button>
+    <button id="loadCopyBtn">Load a copy…</button>
+    <input type="file" id="loadCopyInput" accept=".json,application/json" hidden>
   </div>
 
   <details class="settings">
@@ -558,7 +570,7 @@ async function clearSales() {
   return new Promise((resolve, reject) => {
     const tx = db.transaction([STORE, META], "readwrite");
     tx.objectStore(STORE).clear();
-    tx.objectStore(META).clear();
+    tx.objectStore(META).delete("runs");   // keep the linked-file handle ('dbfile')
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
@@ -608,6 +620,7 @@ async function ingestFiles(fileList) {
     }
   }
   await refresh();
+  await autosave();
   if (errors.length) toast("Some files failed:\n" + errors.join("\n"));
   else toast(`Ingested ${totalRows} rows (${totalNew} new) from ${files.length} file(s).`);
 }
@@ -855,7 +868,7 @@ dz.addEventListener("drop", e => { if (e.dataTransfer.files.length) ingestFiles(
 
 document.getElementById("clearBtn").addEventListener("click", async () => {
   if (confirm("Clear the entire local database? This removes every CSV you've ingested.")) {
-    await clearSales(); await refresh(); toast("Database cleared.");
+    await clearSales(); await refresh(); await autosave(); toast("Database cleared.");
   }
 });
 document.getElementById("exportHighBtn").addEventListener("click", exportHigh);
@@ -896,9 +909,190 @@ document.getElementById("resetCfgBtn").addEventListener("click", async () => {
   toast("Settings reset to defaults.");
 });
 
+/* ───────────────────────── OneDrive memory file (File System Access API) ───────────────────────── */
+
+const FS_OK = ("showSaveFilePicker" in window);
+let dbFileLinked = false;
+
+async function saveHandle(handle) {
+  const db = await openDB();
+  return new Promise(res => {
+    const tx = db.transaction(META, "readwrite");
+    tx.objectStore(META).put({ id: "dbfile", handle });
+    tx.oncomplete = () => res();
+  });
+}
+async function loadHandle() {
+  const db = await openDB();
+  return new Promise(res => {
+    const tx = db.transaction(META, "readonly");
+    const r = tx.objectStore(META).get("dbfile");
+    r.onsuccess = () => res(r.result ? r.result.handle : null);
+    r.onerror = () => res(null);
+  });
+}
+
+async function buildPayload() {
+  const sales = await getAllSales();
+  const runs = await getRuns();
+  return JSON.stringify({ app: "bpi", version: 1, exportedAt: new Date().toISOString(), sales, runs });
+}
+async function writeDBFile(handle) {
+  const w = await handle.createWritable();
+  await w.write(await buildPayload());
+  await w.close();
+}
+async function readDBFile(handle) {
+  const file = await handle.getFile();
+  const text = await file.text();
+  if (!text.trim()) return { sales: [], runs: { count: 0, files: [] } };
+  const data = JSON.parse(text);
+  return { sales: data.sales || [], runs: data.runs || { count: 0, files: [] } };
+}
+async function replaceAllSales(sales, runs) {
+  const db = await openDB();
+  await new Promise((res, rej) => {
+    const tx = db.transaction([STORE, META], "readwrite");
+    const s = tx.objectStore(STORE);
+    s.clear();
+    for (const rec of sales) s.put(rec);
+    if (runs) tx.objectStore(META).put({ id: "runs", count: runs.count || 0, files: runs.files || [] });
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  });
+}
+
+// Auto-save to the linked file after any data change.
+async function autosave() {
+  if (!dbFileLinked) return;
+  try {
+    const h = await loadHandle();
+    if (h) await writeDBFile(h);
+  } catch (e) {
+    toast("Auto-save to memory file failed: " + e.message);
+    updateMemStatus("warn", "auto-save failed");
+  }
+}
+
+function updateMemStatus(state, name) {
+  const el = document.getElementById("memStatus");
+  const link = document.getElementById("linkFileBtn");
+  const recon = document.getElementById("reconnectBtn");
+  el.className = "memchip";
+  recon.style.display = "none";
+  if (state === "linked") {
+    el.classList.add("linked");
+    el.textContent = "Memory: ● " + name + " (auto-saving)";
+    link.textContent = "Change memory file…";
+  } else if (state === "needs-reconnect") {
+    el.classList.add("warn");
+    el.textContent = "Memory: ○ " + name + " — click Reconnect";
+    recon.style.display = "";
+  } else if (state === "warn") {
+    el.classList.add("warn");
+    el.textContent = "Memory: " + name;
+  } else {
+    el.textContent = "Memory: browser-only (not linked to a file)";
+    link.textContent = "Link OneDrive memory file…";
+  }
+}
+
+async function linkFile() {
+  try {
+    const handle = await window.showSaveFilePicker({
+      suggestedName: "bpi-database.json",
+      types: [{ description: "BPI memory file", accept: { "application/json": [".json"] } }]
+    });
+    await saveHandle(handle);
+    dbFileLinked = true;
+    await writeDBFile(handle);          // seed the file with whatever's in the browser now
+    updateMemStatus("linked", handle.name);
+    toast("Memory file linked. Your data now auto-saves to " + handle.name + ".");
+  } catch (e) {
+    if (e.name !== "AbortError") toast("Could not link file: " + e.message);
+  }
+}
+async function reconnect() {
+  const h = await loadHandle();
+  if (!h) { updateMemStatus("browser"); return; }
+  try {
+    const perm = await h.requestPermission({ mode: "readwrite" });
+    if (perm === "granted") {
+      dbFileLinked = true;
+      await loadFromHandle(h);
+      updateMemStatus("linked", h.name);
+      toast("Memory file reconnected and loaded.");
+    } else {
+      toast("Permission denied — staying browser-only this session.");
+    }
+  } catch (e) {
+    toast("Reconnect failed: " + e.message);
+  }
+}
+async function loadFromHandle(h) {
+  try {
+    const { sales, runs } = await readDBFile(h);
+    await replaceAllSales(sales, runs);
+    await refresh();
+  } catch (e) {
+    toast("Could not read memory file: " + e.message);
+  }
+}
+
+async function tryRestore() {
+  if (!FS_OK) {
+    // Browser without File System Access API (e.g. Firefox/Safari) — manual copy only.
+    document.getElementById("linkFileBtn").style.display = "none";
+    updateMemStatus("browser");
+    return;
+  }
+  const h = await loadHandle();
+  if (!h) { updateMemStatus("browser"); return; }
+  try {
+    const perm = await h.queryPermission({ mode: "readwrite" });
+    if (perm === "granted") {
+      dbFileLinked = true;
+      await loadFromHandle(h);
+      updateMemStatus("linked", h.name);
+    } else {
+      // Browsers require a fresh user gesture to re-grant after reopening.
+      updateMemStatus("needs-reconnect", h.name);
+    }
+  } catch (e) {
+    updateMemStatus("needs-reconnect", h.name || "memory file");
+  }
+}
+
+// Manual fallback — works in every browser.
+async function saveCopy() {
+  downloadBlob(await buildPayload(), `bpi-database_${stamp()}.json`, "application/json");
+  toast("Saved a copy. Move it to OneDrive to keep it.");
+}
+function loadCopy() { document.getElementById("loadCopyInput").click(); }
+async function loadCopyFile(file) {
+  try {
+    const data = JSON.parse(await file.text());
+    await replaceAllSales(data.sales || [], data.runs || { count: 0, files: [] });
+    await refresh();
+    await autosave();
+    toast(`Loaded ${(data.sales || []).length} sale records from ${file.name}.`);
+  } catch (e) {
+    toast("Could not load copy: " + e.message);
+  }
+}
+
+document.getElementById("linkFileBtn").addEventListener("click", linkFile);
+document.getElementById("reconnectBtn").addEventListener("click", reconnect);
+document.getElementById("saveCopyBtn").addEventListener("click", saveCopy);
+document.getElementById("loadCopyBtn").addEventListener("click", loadCopy);
+document.getElementById("loadCopyInput").addEventListener("change", e => {
+  if (e.target.files.length) loadCopyFile(e.target.files[0]);
+  e.target.value = "";
+});
+
 /* Boot */
 fillSettings();
-refresh();
+refresh().then(tryRestore);
 </script>
 </body>
 </html>
