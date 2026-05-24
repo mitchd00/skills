@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Batch Property Intelligence — ELP Hub</title>
+<style>
+  :root {
+    --elite-black: #0A0A0A;
+    --warm-white: #F7F4EE;
+    --soft-charcoal: #2A2A2A;
+    --muted-gold: #B8965A;
+    --light-gold: #E8DCC4;
+    --line: #ddd5c5;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    background: var(--warm-white);
+    color: var(--soft-charcoal);
+    margin: 0;
+    font-size: 14px;
+  }
+  header {
+    background: var(--elite-black);
+    color: var(--warm-white);
+    padding: 18px 28px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  header h1 { margin: 0; font-size: 18px; letter-spacing: 2px; font-weight: 700; }
+  header .sub { color: var(--muted-gold); font-size: 12px; font-style: italic; }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 0 28px 64px; }
+
+  .dropzone {
+    border: 2px dashed var(--muted-gold);
+    background: #fff;
+    border-radius: 8px;
+    padding: 36px;
+    text-align: center;
+    margin: 24px 0;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  .dropzone.drag { background: var(--light-gold); border-color: var(--elite-black); }
+  .dropzone h2 { margin: 0 0 6px; color: var(--elite-black); font-size: 16px; letter-spacing: 1px; }
+  .dropzone p { margin: 4px 0; font-size: 13px; }
+  .dropzone .browse { color: var(--muted-gold); text-decoration: underline; font-weight: 600; }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 16px 0; }
+  button {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 8px 14px;
+    border: 1px solid var(--elite-black);
+    background: #fff;
+    color: var(--elite-black);
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  button:hover { background: var(--light-gold); }
+  button.primary { background: var(--elite-black); color: var(--warm-white); }
+  button.primary:hover { background: var(--soft-charcoal); }
+  button.danger { border-color: #9a3b3b; color: #9a3b3b; }
+  button.danger:hover { background: #f6e3e3; }
+
+  .dbstat { font-size: 12px; color: var(--soft-charcoal); margin-left: auto; }
+  .dbstat b { color: var(--elite-black); }
+
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0; }
+  .stat { background: #fff; padding: 16px; border-left: 3px solid var(--muted-gold); }
+  .stat .num { font-size: 26px; font-weight: 700; color: var(--elite-black); }
+  .stat .label { font-size: 11px; margin-top: 4px; }
+
+  .tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 2px solid var(--muted-gold); margin-top: 24px; }
+  .tab {
+    padding: 9px 16px; cursor: pointer; font-size: 13px; font-weight: 600;
+    background: transparent; border: none; color: var(--soft-charcoal);
+    border-bottom: 3px solid transparent; margin-bottom: -2px;
+  }
+  .tab.active { color: var(--elite-black); border-bottom-color: var(--elite-black); }
+  .tab .count { color: var(--muted-gold); font-weight: 400; }
+
+  .panel { display: none; margin-top: 16px; }
+  .panel.active { display: block; }
+
+  table { width: 100%; border-collapse: collapse; background: #fff; font-size: 12px; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: var(--elite-black); color: #fff; position: sticky; top: 0; font-size: 11px; white-space: nowrap; }
+  tr.s10, tr.s9, tr.s8 { background: var(--light-gold); }
+  tr.s10 td, tr.s9 td, tr.s8 td { font-weight: 600; }
+  .table-scroll { max-height: 70vh; overflow: auto; border: 1px solid var(--line); }
+  .grade { display: inline-block; padding: 1px 7px; border-radius: 3px; font-size: 11px; font-weight: 700; }
+  .HIGH { background: var(--muted-gold); color: #fff; }
+  .MEDIUM { background: var(--light-gold); color: var(--soft-charcoal); }
+  .LOW { background: #efeae0; color: #8a8270; }
+  .NO { background: #f3f3f3; color: #aaa; }
+  .score { font-weight: 700; color: var(--elite-black); }
+
+  .filterbar { margin: 8px 0; }
+  .filterbar input { padding: 7px 10px; font-size: 13px; border: 1px solid var(--line); border-radius: 4px; width: 280px; max-width: 100%; }
+
+  details.settings { background: #fff; border: 1px solid var(--line); border-radius: 6px; margin: 16px 0; padding: 0 16px; }
+  details.settings summary { cursor: pointer; padding: 12px 0; font-weight: 700; color: var(--elite-black); }
+  details.settings .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; padding-bottom: 16px; }
+  details.settings label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+  details.settings textarea { width: 100%; height: 120px; font-family: monospace; font-size: 12px; padding: 6px; border: 1px solid var(--line); border-radius: 4px; }
+  details.settings input[type=number] { width: 80px; padding: 5px; border: 1px solid var(--line); border-radius: 4px; }
+
+  .empty { text-align: center; padding: 48px; color: #a39c8b; }
+  .toast { position: fixed; bottom: 20px; right: 20px; background: var(--elite-black); color: var(--warm-white); padding: 12px 18px; border-radius: 6px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,.2); opacity: 0; transition: opacity .25s; pointer-events: none; max-width: 360px; }
+  .toast.show { opacity: 1; }
+  .muted { color: #a39c8b; font-size: 12px; }
+  h3.section { color: var(--muted-gold); letter-spacing: 1px; font-size: 13px; border-bottom: 1px solid var(--muted-gold); padding-bottom: 5px; margin-top: 28px; }
+  footer { text-align: center; color: #a39c8b; font-size: 11px; padding: 24px; border-top: 1px solid var(--line); margin-top: 40px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>BATCH PROPERTY INTELLIGENCE</h1>
+    <div class="sub">Elite Lifestyle Properties — Intelligence Hub (browser edition)</div>
+  </div>
+  <div class="sub" id="versionTag">V1.2 · runs entirely on your machine · no data leaves the browser</div>
+</header>
+
+<div class="wrap">
+
+  <div class="dropzone" id="dropzone">
+    <h2>Drop RP Data CSV export(s) here</h2>
+    <p>or <span class="browse">click to browse</span></p>
+    <p class="muted">Each CSV is added to a local database in your browser. Scores recompute across everything you've dropped — cross-suburb portfolios light up automatically. Drop the same file twice and it de-duplicates.</p>
+    <input type="file" id="fileInput" accept=".csv" multiple hidden>
+  </div>
+
+  <div class="toolbar">
+    <button class="primary" id="pickBtn">Pick CSV…</button>
+    <button id="exportHighBtn">Export High Priority (Excel)</button>
+    <button id="exportAllBtn">Export All (CSV)</button>
+    <button class="danger" id="clearBtn">Clear database</button>
+    <div class="dbstat" id="dbstat">Database empty</div>
+  </div>
+
+  <details class="settings">
+    <summary>Scoring settings (tunable — saved in this browser)</summary>
+    <div class="grid">
+      <div>
+        <label>SC postcodes (comma-separated)</label>
+        <input type="text" id="cfgPostcodes" style="width:100%;padding:6px;border:1px solid var(--line);border-radius:4px;">
+        <label style="margin-top:10px;">Long-held years (single-property → seller signal)</label>
+        <input type="number" id="cfgLongHeld">
+        <label style="margin-top:10px;">Recent-purchase years (→ Seller NO)</label>
+        <input type="number" id="cfgRecent">
+      </div>
+      <div>
+        <label>Entity name patterns (one per line)</label>
+        <textarea id="cfgEntity"></textarea>
+      </div>
+      <div>
+        <label>Non-saleable owner patterns (one per line)</label>
+        <textarea id="cfgNonSaleable"></textarea>
+      </div>
+      <div>
+        <label>Non-saleable land-use patterns (one per line)</label>
+        <textarea id="cfgLandUse"></textarea>
+      </div>
+    </div>
+    <div style="padding-bottom:16px;">
+      <button class="primary" id="applyCfgBtn">Apply &amp; recompute</button>
+      <button id="resetCfgBtn">Reset to defaults</button>
+    </div>
+  </details>
+
+  <div id="dashboard" style="display:none;">
+    <div class="stat-grid" id="statGrid"></div>
+
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="summary">Summary</button>
+      <button class="tab" data-tab="high">High Priority <span class="count" id="cnt-high"></span></button>
+      <button class="tab" data-tab="portfolios">Portfolios <span class="count" id="cnt-portfolios"></span></button>
+      <button class="tab" data-tab="rentals">Rentals <span class="count" id="cnt-rentals"></span></button>
+      <button class="tab" data-tab="all">All Properties <span class="count" id="cnt-all"></span></button>
+      <button class="tab" data-tab="filtered">Filtered Out <span class="count" id="cnt-filtered"></span></button>
+    </div>
+
+    <div class="panel active" id="panel-summary"></div>
+    <div class="panel" id="panel-high"></div>
+    <div class="panel" id="panel-portfolios"></div>
+    <div class="panel" id="panel-rentals"></div>
+    <div class="panel" id="panel-all"></div>
+    <div class="panel" id="panel-filtered"></div>
+  </div>
+
+  <div class="empty" id="emptyState">
+    <p>No data yet. Drop an RP Data CSV above to begin.</p>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<footer>
+  Elite Lifestyle Properties · batch-property-intelligence · browser edition · All processing is local — no network, no upload.
+</footer>
+
+<script>
+"use strict";
+
+/* ───────────────────────── Config ───────────────────────── */
+
+const DEFAULT_CONFIG = {
+  sc_postcodes: [4551, 4575, 4556, 4557, 4558, 4573, 4566],
+  long_held_years: 15,
+  recent_purchase_years: 5,
+  entity_patterns: [
+    "PTY LTD","PTY. LTD","LIMITED"," LTD","TRUST","SUPER","SUPERANNUATION","SMSF",
+    "NOMINEES","HOLDINGS","INVESTMENTS","PROPERTIES"," GROUP"," CO."," & CO",
+    "PARTNERSHIP","CORPORATION","ENTERPRISES"
+  ],
+  non_saleable_patterns: [
+    "RESERVE FOR","SUNSHINE COAST REGIONAL COUNCIL","SUNSHINE COAST COUNCIL",
+    "STATE OF QUEENSLAND","DEPARTMENT OF","COMMONWEALTH OF AUSTRALIA","CROWN LAND",
+    "QUEENSLAND RAIL","ENERGEX","TELSTRA CORPORATION","AUSTRALIA POST",
+    "OZCARE","BLUECARE","ANGLICARE","UNITINGCARE","MERCY AGED","SOUTHERN CROSS CARE",
+    "REGIS AGED CARE","BUPA AGED","OPAL AGED","RSL CARE","MASONIC CARE","TRICARE",
+    "ESTIA HEALTH","COAST2BAY HOUSING","COMMUNITY HOUSING","HOUSING GROUP LIMITED",
+    "HOUSING TRUST","CHURCH OF","ARCHDIOCESE OF","DIOCESE OF","TRUSTEES OF THE",
+    "SALVATION ARMY","ANGLICAN CHURCH","CATHOLIC CHURCH"
+  ],
+  non_saleable_land_uses: [
+    "Reserves","Recreational","Public Buildings","Educational - Govt","Roads","Drainage","Cemetery"
+  ]
+};
+
+function loadConfig() {
+  try {
+    const saved = localStorage.getItem("bpi_config");
+    if (saved) return Object.assign({}, DEFAULT_CONFIG, JSON.parse(saved));
+  } catch (e) {}
+  return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+}
+function saveConfig(cfg) { localStorage.setItem("bpi_config", JSON.stringify(cfg)); }
+
+let CONFIG = loadConfig();
+
+/* ───────────────────────── Combined-score matrix ───────────────────────── */
+
+const SCORE_MATRIX = {
+  "HIGH|HIGH":   [10, "Seller + PM combined pitch — portfolio investor with rentals. Approach with portfolio review framing."],
+  "HIGH|MEDIUM": [9,  "Seller approach + PM upsell"],
+  "HIGH|LOW":    [8,  "Seller approach — multi-property owner, possible rental in portfolio"],
+  "HIGH|NO":     [8,  "Seller approach — multi-property owner, mostly owner-occupied"],
+  "MEDIUM|HIGH": [7,  "PM pitch first, seller conversation second"],
+  "MEDIUM|MEDIUM":[6, "PM pitch, mention sales side"],
+  "MEDIUM|LOW":  [5,  "Long nurture — DNA Plan #1, possible PM"],
+  "MEDIUM|NO":   [5,  "Long nurture — DNA Plan #1"],
+  "LOW|HIGH":    [5,  "PM pitch only"],
+  "LOW|MEDIUM":  [4,  "PM pitch only"],
+  "LOW|LOW":     [3,  "Long nurture"],
+  "LOW|NO":      [3,  "Long nurture"],
+  "NO|HIGH":     [4,  "PM pitch only — non-saleable but rental opportunity"],
+  "NO|MEDIUM":   [3,  "PM pitch only"],
+  "NO|LOW":      [2,  "Cache for future"],
+  "NO|NO":       [1,  "Skip"]
+};
+
+/* ───────────────────────── CSV parsing ───────────────────────── */
+
+const EXPECTED = ["Street Address","Owner 1 Name"];
+
+// Character-level CSV parser handling quoted fields with embedded commas/quotes.
+function parseCSV(text) {
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // strip BOM
+  const rows = [];
+  let row = [], field = "", inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ",") { row.push(field); field = ""; }
+      else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
+      else if (c === "\r") { /* skip */ }
+      else field += c;
+    }
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+function detectHeaderIndex(rows) {
+  for (let i = 0; i < Math.min(rows.length, 12); i++) {
+    const joined = rows[i].join("");
+    if (joined.includes("Street Address") && joined.includes("Owner 1 Name")) return i;
+  }
+  return 0;
+}
+
+const MONTHS = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+function parseSaleDate(s) {
+  if (!s) return null;
+  const m = String(s).trim().match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
+  if (!m) { const d = new Date(s); return isNaN(d) ? null : d; }
+  const mon = MONTHS[m[2].toLowerCase()];
+  if (mon === undefined) return null;
+  return new Date(Number(m[3]), mon, Number(m[1]));
+}
+function parsePrice(s) {
+  if (!s) return null;
+  const cleaned = String(s).replace(/[$,]/g, "").trim();
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? null : n;
+}
+function parseIntSafe(s) {
+  if (s === null || s === undefined || s === "") return null;
+  const n = parseInt(String(s).replace(/,/g, ""), 10);
+  return isNaN(n) ? null : n;
+}
+function normName(s) {
+  if (!s) return "-";
+  const t = String(s).trim().toUpperCase().replace(/\s+/g, " ");
+  return t || "-";
+}
+
+// Turn a parsed CSV file into normalised sale records.
+function csvToSaleRecords(text, sourceName) {
+  const rows = parseCSV(text);
+  const hi = detectHeaderIndex(rows);
+  const header = rows[hi].map(h => h.trim());
+  const idx = {};
+  header.forEach((h, i) => { idx[h] = i; });
+  for (const req of EXPECTED) {
+    if (!(req in idx)) throw new Error(`Not an RP Data export — missing "${req}" column.`);
+  }
+  const get = (r, name) => (idx[name] !== undefined ? (r[idx[name]] || "").trim() : "");
+  const records = [];
+  for (let i = hi + 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r || r.length < 3) continue;
+    const street = get(r, "Street Address");
+    const suburb = get(r, "Suburb");
+    const state = get(r, "State");
+    const postcode = get(r, "Postcode");
+    if (!street && !suburb) continue;
+    const parcelDetails = get(r, "Parcel Details");
+    const fullAddress = `${street}, ${titleCase(suburb)} ${state} ${postcode}`.trim();
+    // Key on Parcel Details exactly as the canonical pipeline does (blank values
+    // collapse together — matches pandas groupby on the "Parcel Details" column).
+    const parcelKey = `PD:${(parcelDetails || "").toUpperCase()}`;
+    const saleDate = parseSaleDate(get(r, "Sale Date"));
+    const salePrice = parsePrice(get(r, "Sale Price"));
+    const owner1 = normName(get(r, "Owner 1 Name"));
+    const rec = {
+      parcelKey, parcelDetails, fullAddress,
+      street, suburb, state, postcode,
+      councilArea: get(r, "Council Area"),
+      propertyType: get(r, "Property Type"),
+      bed: parseIntSafe(get(r, "Bed")),
+      bath: parseIntSafe(get(r, "Bath")),
+      car: parseIntSafe(get(r, "Car")),
+      landSize: parseIntSafe(get(r, "Land Size (m²)")),
+      yearBuilt: parseIntSafe(get(r, "Year Built")),
+      saleDateMs: saleDate ? saleDate.getTime() : null,
+      saleDateStr: get(r, "Sale Date"),
+      salePrice,
+      saleType: get(r, "Sale Type"),
+      landUse: get(r, "Land Use"),
+      developmentZone: get(r, "Development Zone"),
+      owner1,
+      owner2: normName(get(r, "Owner 2 Name")),
+      owner3: normName(get(r, "Owner 3 Name")),
+      ownerType: get(r, "Owner Type") || "-",
+      openInRpData: get(r, "Open in RPData"),
+      sourceCsv: sourceName
+    };
+    // Composite dedup key — matches the Python sales PK
+    rec.k = `${parcelKey}|${rec.saleDateMs || ""}|${salePrice || ""}|${owner1}`;
+    records.push(rec);
+  }
+  return records;
+}
+
+function titleCase(s) {
+  return String(s || "").toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/* ───────────────────────── Scoring logic (ported from Python) ───────────────────────── */
+
+function classifyEntity(name) {
+  if (!name || name === "-" || name === "NAN") return "Unknown";
+  const up = name.toUpperCase();
+  for (const p of CONFIG.entity_patterns) if (up.includes(p.toUpperCase())) return "Entity";
+  return "Individual";
+}
+function isNonSaleable(name, landUse) {
+  if (name && name !== "-") {
+    const up = name.toUpperCase();
+    for (const p of CONFIG.non_saleable_patterns) if (up.includes(p.toUpperCase())) return true;
+  }
+  if (landUse && landUse !== "-") {
+    const low = landUse.toLowerCase();
+    for (const p of CONFIG.non_saleable_land_uses) if (low.includes(p.toLowerCase())) return true;
+  }
+  return false;
+}
+function scoreSeller(p) {
+  if (p.nonSaleable) return "NO";
+  if (!p.hasSaleRecord || ["-","UNKNOWN",""].includes(p.owner1)) return "NO";
+  const count = p.ownerPropertyCount;
+  if (count >= 4) return "HIGH";
+  if (count === 3) return "HIGH";
+  if (count === 2) return "MEDIUM";
+  if (count === 1) {
+    if (p.ownerClass === "Entity") return "MEDIUM";
+    if (p.ownerClass === "Individual") {
+      const y = p.yearsSinceSale;
+      if (y >= CONFIG.long_held_years && p.ownerType === "Rented") return "MEDIUM";
+      if (y >= CONFIG.long_held_years) return "LOW";
+      if (y < CONFIG.recent_purchase_years) return "NO";
+      return "LOW";
+    }
+  }
+  return "NO";
+}
+function scoreRental(p) {
+  if (p.nonSaleable) return "NO";
+  const ot = p.ownerType, rc = p.ownerRentalCount;
+  if (ot === "Rented" && rc >= 2) return "HIGH";
+  if (ot === "Rented") return "MEDIUM";
+  if (["-","","Unknown"].includes(ot) && rc >= 1) return "LOW";
+  if (ot === "Owner Occupied") return "NO";
+  return "NO";
+}
+function combine(seller, rental) {
+  return SCORE_MATRIX[`${seller}|${rental}`] || [1, "Skip"];
+}
+
+// Full recompute across all stored sale records → array of scored current-owner parcels.
+function recompute(allSales) {
+  const scSet = new Set(CONFIG.sc_postcodes.map(Number));
+  const now = Date.now();
+
+  // 1. Current owner per parcel — latest sale wins.
+  const byParcel = new Map();
+  const saleCount = new Map();
+  for (const s of allSales) {
+    saleCount.set(s.parcelKey, (saleCount.get(s.parcelKey) || 0) + 1);
+    const cur = byParcel.get(s.parcelKey);
+    const sMs = s.saleDateMs === null ? -Infinity : s.saleDateMs;
+    const cMs = cur && cur.saleDateMs !== null ? cur.saleDateMs : -Infinity;
+    if (!cur || sMs > cMs) byParcel.set(s.parcelKey, s);
+  }
+
+  // 2. Build parcel rows with classification + non-saleable + SC membership.
+  const parcels = [];
+  for (const [pk, s] of byParcel) {
+    const postcodeInt = parseInt(s.postcode, 10) || 0;
+    const inSC = scSet.has(postcodeInt);
+    const nonSaleable = isNonSaleable(s.owner1, s.landUse);
+    const ownerClass = classifyEntity(s.owner1);
+    const hasSaleRecord = s.saleDateMs !== null;
+    const yearsSinceSale = hasSaleRecord ? (now - s.saleDateMs) / (365.25 * 864e5) : 0;
+    parcels.push({
+      ...s,
+      parcelKeyResolved: pk,
+      inSC, nonSaleable, ownerClass, hasSaleRecord,
+      yearsSinceSale: Math.round(yearsSinceSale * 10) / 10,
+      saleEvents: saleCount.get(pk) || 1,
+      jointOwner: s.owner2 && s.owner2 !== "-"
+    });
+  }
+
+  // 3. Portfolio counting — countable = in SC, saleable, known owner.
+  const portfolio = new Map(); // owner → {parcels:Set, rentals:Set, addrs:[], rentalAddrs:[]}
+  for (const p of parcels) {
+    if (!p.inSC || p.nonSaleable) continue;
+    if (["-","UNKNOWN","","NAN"].includes(p.owner1)) continue;
+    let e = portfolio.get(p.owner1);
+    if (!e) { e = { parcels: new Set(), rentals: new Set(), addrs: new Set(), rentalAddrs: new Set() }; portfolio.set(p.owner1, e); }
+    e.parcels.add(p.parcelKeyResolved);
+    e.addrs.add(p.fullAddress);
+    if (p.ownerType === "Rented") { e.rentals.add(p.parcelKeyResolved); e.rentalAddrs.add(p.fullAddress); }
+  }
+
+  // 4. Attach counts + score.
+  for (const p of parcels) {
+    const e = portfolio.get(p.owner1);
+    p.ownerPropertyCount = e ? e.parcels.size : 0;
+    p.ownerRentalCount = e ? e.rentals.size : 0;
+    p.ownerProperties = e ? Array.from(e.addrs).sort().join("; ") : "";
+    p.ownerRentals = e ? Array.from(e.rentalAddrs).sort().join("; ") : "";
+    p.portfolioInvestor = p.ownerPropertyCount >= 4;
+    p.sellerLead = scoreSeller(p);
+    p.rentalLead = scoreRental(p);
+    const [score, action] = combine(p.sellerLead, p.rentalLead);
+    p.combinedScore = score;
+    p.recommendedAction = action;
+  }
+  return parcels;
+}
+
+/* ───────────────────────── IndexedDB (the Hub store) ───────────────────────── */
+
+const DB_NAME = "bpi_hub", STORE = "sales", META = "meta";
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: "k" });
+      if (!db.objectStoreNames.contains(META)) db.createObjectStore(META, { keyPath: "id" });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function putSales(records) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    const store = tx.objectStore(STORE);
+    let added = 0;
+    // count existing to compute "new" deterministically
+    const existing = new Set();
+    const cursorReq = store.openKeyCursor();
+    cursorReq.onsuccess = () => {
+      const cur = cursorReq.result;
+      if (cur) { existing.add(cur.key); cur.continue(); }
+      else {
+        for (const rec of records) {
+          if (!existing.has(rec.k)) added++;
+          store.put(rec);
+        }
+      }
+    };
+    tx.oncomplete = () => resolve({ added });
+    tx.onerror = () => reject(tx.error);
+  });
+}
+async function getAllSales() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readonly");
+    const req = tx.objectStore(STORE).getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function clearSales() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE, META], "readwrite");
+    tx.objectStore(STORE).clear();
+    tx.objectStore(META).clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+async function bumpRuns(sourceName) {
+  const db = await openDB();
+  return new Promise((resolve) => {
+    const tx = db.transaction(META, "readwrite");
+    const store = tx.objectStore(META);
+    const getReq = store.get("runs");
+    getReq.onsuccess = () => {
+      const cur = getReq.result || { id: "runs", count: 0, files: [] };
+      cur.count++;
+      cur.files = (cur.files || []).concat([sourceName]).slice(-50);
+      store.put(cur);
+    };
+    tx.oncomplete = () => resolve();
+  });
+}
+async function getRuns() {
+  const db = await openDB();
+  return new Promise((resolve) => {
+    const tx = db.transaction(META, "readonly");
+    const req = tx.objectStore(META).get("runs");
+    req.onsuccess = () => resolve(req.result || { count: 0, files: [] });
+    req.onerror = () => resolve({ count: 0, files: [] });
+  });
+}
+
+/* ───────────────────────── App state + rendering ───────────────────────── */
+
+let DATASET = [];   // last recompute result
+
+async function ingestFiles(fileList) {
+  const files = Array.from(fileList).filter(f => /\.csv$/i.test(f.name));
+  if (!files.length) { toast("No CSV files selected."); return; }
+  let totalNew = 0, totalRows = 0, errors = [];
+  for (const file of files) {
+    try {
+      const text = await file.text();
+      const records = csvToSaleRecords(text, file.name);
+      const { added } = await putSales(records);
+      await bumpRuns(file.name);
+      totalNew += added; totalRows += records.length;
+    } catch (e) {
+      errors.push(`${file.name}: ${e.message}`);
+    }
+  }
+  await refresh();
+  if (errors.length) toast("Some files failed:\n" + errors.join("\n"));
+  else toast(`Ingested ${totalRows} rows (${totalNew} new) from ${files.length} file(s).`);
+}
+
+async function refresh() {
+  const allSales = await getAllSales();
+  const runs = await getRuns();
+  if (!allSales.length) {
+    DATASET = [];
+    document.getElementById("dashboard").style.display = "none";
+    document.getElementById("emptyState").style.display = "block";
+    document.getElementById("dbstat").textContent = "Database empty";
+    return;
+  }
+  DATASET = recompute(allSales);
+  document.getElementById("emptyState").style.display = "none";
+  document.getElementById("dashboard").style.display = "block";
+
+  const parcels = DATASET.length;
+  const owners = new Set(DATASET.filter(p => !["-","UNKNOWN","","NAN"].includes(p.owner1)).map(p => p.owner1)).size;
+  document.getElementById("dbstat").innerHTML =
+    `<b>${allSales.length}</b> sales · <b>${parcels}</b> parcels · <b>${owners}</b> owners · <b>${runs.count}</b> ingests`;
+
+  renderDashboard();
+}
+
+function gradeSpan(g) { return `<span class="grade ${g}">${g}</span>`; }
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+function renderDashboard() {
+  const saleable = DATASET.filter(p => !p.nonSaleable);
+  const high = DATASET.filter(p => p.sellerLead === "HIGH" || p.rentalLead === "HIGH")
+                      .sort((a, b) => b.combinedScore - a.combinedScore);
+  const rentals = DATASET.filter(p => p.ownerType === "Rented")
+                         .sort((a, b) => b.combinedScore - a.combinedScore);
+  const filtered = DATASET.filter(p => p.nonSaleable);
+
+  // Portfolios (owners with 2+)
+  const seen = new Set();
+  const portfolios = [];
+  for (const p of saleable.slice().sort((a, b) => b.ownerPropertyCount - a.ownerPropertyCount)) {
+    if (p.ownerPropertyCount >= 2 && !seen.has(p.owner1)) {
+      seen.add(p.owner1);
+      portfolios.push(p);
+    }
+  }
+
+  // Stat cards
+  const dist = g => saleable.filter(p => p.sellerLead === g).length;
+  const rdist = g => saleable.filter(p => p.rentalLead === g).length;
+  const owners2 = new Set(saleable.filter(p => p.ownerPropertyCount >= 2).map(p => p.owner1)).size;
+  const owners4 = new Set(saleable.filter(p => p.ownerPropertyCount >= 4).map(p => p.owner1)).size;
+  const confirmedRentals = saleable.filter(p => p.ownerType === "Rented").length;
+
+  document.getElementById("statGrid").innerHTML = [
+    card(DATASET.length, "Total parcels"),
+    card(high.length, "High-priority leads"),
+    card(confirmedRentals, "Confirmed rentals"),
+    card(owners2, "Multi-property owners"),
+    card(owners4, "Portfolio investors (4+)"),
+    card(filtered.length, "Filtered out"),
+  ].join("");
+
+  setCount("high", high.length);
+  setCount("portfolios", portfolios.length);
+  setCount("rentals", rentals.length);
+  setCount("all", DATASET.length);
+  setCount("filtered", filtered.length);
+
+  // Summary panel
+  const top20 = DATASET.slice().sort((a, b) => b.combinedScore - a.combinedScore).slice(0, 20);
+  document.getElementById("panel-summary").innerHTML = `
+    <h3 class="section">LEAD GRADE DISTRIBUTION</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;max-width:640px;">
+      <div>${distTable("Seller Lead", ["HIGH","MEDIUM","LOW","NO"].map(g => [g, dist(g)]))}</div>
+      <div>${distTable("Rental Lead", ["HIGH","MEDIUM","LOW","NO"].map(g => [g, rdist(g)]))}</div>
+    </div>
+    <h3 class="section">TOP 20 SCORERS</h3>
+    ${leadTable(top20)}
+  `;
+
+  document.getElementById("panel-high").innerHTML = leadTable(high);
+  document.getElementById("panel-rentals").innerHTML = leadTable(rentals);
+  document.getElementById("panel-filtered").innerHTML = filteredTable(filtered);
+  document.getElementById("panel-portfolios").innerHTML = portfolioTable(portfolios);
+  renderAllPanel(DATASET);
+}
+
+function card(num, label) { return `<div class="stat"><div class="num">${num}</div><div class="label">${label}</div></div>`; }
+function setCount(id, n) { document.getElementById("cnt-" + id).textContent = `(${n})`; }
+function distTable(title, rows) {
+  return `<table style="font-size:13px;"><thead><tr><th>${title}</th><th style="text-align:right;">Count</th></tr></thead><tbody>` +
+    rows.map(([g, n]) => `<tr><td>${gradeSpan(g)}</td><td style="text-align:right;font-weight:600;">${n}</td></tr>`).join("") +
+    `</tbody></table>`;
+}
+
+function leadTable(rows) {
+  if (!rows.length) return `<div class="empty">No matching properties.</div>`;
+  const body = rows.map(p => `
+    <tr class="s${p.combinedScore}">
+      <td class="score">${p.combinedScore}</td>
+      <td>${gradeSpan(p.sellerLead)}</td>
+      <td>${gradeSpan(p.rentalLead)}</td>
+      <td>${esc(p.fullAddress)}</td>
+      <td>${esc(p.owner1)}</td>
+      <td>${esc(p.ownerClass)}</td>
+      <td style="text-align:center;">${p.ownerPropertyCount}</td>
+      <td style="text-align:center;">${p.ownerRentalCount}</td>
+      <td>${esc(p.ownerType)}</td>
+      <td>${esc(p.recommendedAction)}</td>
+    </tr>`).join("");
+  return `<div class="table-scroll"><table>
+    <thead><tr><th>Score</th><th>Seller</th><th>Rental</th><th>Address</th><th>Owner</th><th>Class</th><th>Props</th><th>Rentals</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+}
+
+function portfolioTable(rows) {
+  if (!rows.length) return `<div class="empty">No owners with 2+ properties yet. Drop more suburb exports to surface cross-suburb portfolios.</div>`;
+  const profile = p => {
+    if (p.ownerPropertyCount >= 4 && p.ownerRentalCount >= 2) return "Portfolio investor with rentals — top priority";
+    if (p.ownerPropertyCount >= 4) return "Portfolio investor — high priority";
+    if (p.ownerRentalCount >= 2) return "Multi-property landlord — PM target";
+    if (p.ownerPropertyCount >= 3) return "Active portfolio holder";
+    if (p.ownerRentalCount >= 1) return "Investor with at least one rental";
+    return "Multi-property owner-occupier";
+  };
+  const body = rows.map(p => `
+    <tr>
+      <td>${esc(p.owner1)}</td>
+      <td>${esc(p.ownerClass)}</td>
+      <td style="text-align:center;font-weight:700;">${p.ownerPropertyCount}</td>
+      <td style="text-align:center;">${p.ownerRentalCount}</td>
+      <td>${esc(profile(p))}</td>
+      <td style="font-size:11px;">${esc(p.ownerProperties)}</td>
+    </tr>`).join("");
+  return `<div class="table-scroll"><table>
+    <thead><tr><th>Owner</th><th>Class</th><th>Properties</th><th>Rentals</th><th>Profile</th><th>Addresses</th></tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+}
+
+function filteredTable(rows) {
+  if (!rows.length) return `<div class="empty">Nothing filtered out.</div>`;
+  const body = rows.map(p => `
+    <tr><td>${esc(p.fullAddress)}</td><td>${esc(p.propertyType)}</td><td>${esc(p.owner1)}</td><td>${esc(p.landUse)}</td></tr>`).join("");
+  return `<div class="table-scroll"><table>
+    <thead><tr><th>Address</th><th>Type</th><th>Owner</th><th>Land Use</th></tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+}
+
+function renderAllPanel(all) {
+  const panel = document.getElementById("panel-all");
+  panel.innerHTML = `
+    <div class="filterbar"><input type="text" id="allFilter" placeholder="Filter by address, owner, suburb…"></div>
+    <div id="allTableHost"></div>`;
+  const host = panel.querySelector("#allTableHost");
+  const draw = (q) => {
+    let rows = all.slice().sort((a, b) => b.combinedScore - a.combinedScore);
+    if (q) {
+      const ql = q.toLowerCase();
+      rows = rows.filter(p => (p.fullAddress + " " + p.owner1 + " " + p.suburb).toLowerCase().includes(ql));
+    }
+    const cap = 1500;
+    const shown = rows.slice(0, cap);
+    host.innerHTML = leadTable(shown) +
+      (rows.length > cap ? `<p class="muted">Showing first ${cap} of ${rows.length}. Use the filter or export for the full set.</p>` : "");
+  };
+  draw("");
+  panel.querySelector("#allFilter").addEventListener("input", e => draw(e.target.value));
+}
+
+/* ───────────────────────── Export ───────────────────────── */
+
+function stamp() {
+  const d = new Date(), p = n => String(n).padStart(2, "0");
+  return `${p(d.getDate())}-${p(d.getMonth()+1)}-${d.getFullYear()}_${p(d.getHours())}${p(d.getMinutes())}`;
+}
+function downloadBlob(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+function csvCell(v) {
+  const s = String(v == null ? "" : v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+const EXPORT_COLS = [
+  ["combinedScore","Combined Lead Score"],["sellerLead","Seller Lead"],["rentalLead","Rental Lead"],
+  ["recommendedAction","Recommended Action"],["fullAddress","Address"],["propertyType","Property Type"],
+  ["bed","Bed"],["bath","Bath"],["car","Car"],["landSize","Land Size m2"],["yearBuilt","Year Built"],
+  ["owner1","Owner 1"],["ownerClass","Owner Class"],["ownerType","Owner Type"],["jointOwner","Joint Owner"],
+  ["owner2","Owner 2"],["ownerPropertyCount","Owner Property Count"],["ownerRentalCount","Owner Rental Count"],
+  ["ownerProperties","Owner Properties"],["ownerRentals","Owner Rentals"],["portfolioInvestor","Portfolio Investor"],
+  ["saleDateStr","Sale Date"],["salePrice","Sale Price"],["yearsSinceSale","Years Since Sale"],
+  ["saleEvents","Sale Events"],["landUse","Land Use"],["developmentZone","Development Zone"],
+  ["parcelDetails","Parcel Details"],["openInRpData","Open in RPData"]
+];
+function rowsToCSV(rows) {
+  const head = EXPORT_COLS.map(c => c[1]).join(",");
+  const body = rows.map(p => EXPORT_COLS.map(c => csvCell(p[c[0]])).join(",")).join("\n");
+  return head + "\n" + body;
+}
+function rowsToExcelHTML(rows, title) {
+  const head = EXPORT_COLS.map(c => `<th>${esc(c[1])}</th>`).join("");
+  const body = rows.map(p => "<tr>" + EXPORT_COLS.map(c => `<td>${esc(p[c[0]])}</td>`).join("") + "</tr>").join("");
+  return `<html><head><meta charset="UTF-8"></head><body><h3>${esc(title)}</h3>
+    <table border="1"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></body></html>`;
+}
+
+function exportHigh() {
+  if (!DATASET.length) { toast("Nothing to export."); return; }
+  const high = DATASET.filter(p => p.sellerLead === "HIGH" || p.rentalLead === "HIGH")
+                      .sort((a, b) => b.combinedScore - a.combinedScore);
+  downloadBlob(rowsToExcelHTML(high, "BPI High Priority"),
+    `BPI_HighPriority_V1_${stamp()}.xls`, "application/vnd.ms-excel");
+  toast(`Exported ${high.length} high-priority leads to Excel.`);
+}
+function exportAll() {
+  if (!DATASET.length) { toast("Nothing to export."); return; }
+  const rows = DATASET.slice().sort((a, b) => b.combinedScore - a.combinedScore);
+  downloadBlob(rowsToCSV(rows), `BPI_AllProperties_V1_${stamp()}.csv`, "text/csv;charset=utf-8");
+  toast(`Exported ${rows.length} parcels to CSV.`);
+}
+
+/* ───────────────────────── UI wiring ───────────────────────── */
+
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove("show"), 4000);
+}
+
+const dz = document.getElementById("dropzone");
+const fileInput = document.getElementById("fileInput");
+dz.addEventListener("click", () => fileInput.click());
+document.getElementById("pickBtn").addEventListener("click", () => fileInput.click());
+fileInput.addEventListener("change", e => { ingestFiles(e.target.files); fileInput.value = ""; });
+["dragenter","dragover"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add("drag"); }));
+["dragleave","drop"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove("drag"); }));
+dz.addEventListener("drop", e => { if (e.dataTransfer.files.length) ingestFiles(e.dataTransfer.files); });
+
+document.getElementById("clearBtn").addEventListener("click", async () => {
+  if (confirm("Clear the entire local database? This removes every CSV you've ingested.")) {
+    await clearSales(); await refresh(); toast("Database cleared.");
+  }
+});
+document.getElementById("exportHighBtn").addEventListener("click", exportHigh);
+document.getElementById("exportAllBtn").addEventListener("click", exportAll);
+
+document.querySelectorAll(".tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+    tab.classList.add("active");
+    document.getElementById("panel-" + tab.dataset.tab).classList.add("active");
+  });
+});
+
+/* Settings panel */
+function fillSettings() {
+  document.getElementById("cfgPostcodes").value = CONFIG.sc_postcodes.join(", ");
+  document.getElementById("cfgLongHeld").value = CONFIG.long_held_years;
+  document.getElementById("cfgRecent").value = CONFIG.recent_purchase_years;
+  document.getElementById("cfgEntity").value = CONFIG.entity_patterns.join("\n");
+  document.getElementById("cfgNonSaleable").value = CONFIG.non_saleable_patterns.join("\n");
+  document.getElementById("cfgLandUse").value = CONFIG.non_saleable_land_uses.join("\n");
+}
+document.getElementById("applyCfgBtn").addEventListener("click", async () => {
+  CONFIG.sc_postcodes = document.getElementById("cfgPostcodes").value.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+  CONFIG.long_held_years = parseFloat(document.getElementById("cfgLongHeld").value) || 15;
+  CONFIG.recent_purchase_years = parseFloat(document.getElementById("cfgRecent").value) || 5;
+  CONFIG.entity_patterns = document.getElementById("cfgEntity").value.split("\n").map(s => s.trim()).filter(Boolean);
+  CONFIG.non_saleable_patterns = document.getElementById("cfgNonSaleable").value.split("\n").map(s => s.trim()).filter(Boolean);
+  CONFIG.non_saleable_land_uses = document.getElementById("cfgLandUse").value.split("\n").map(s => s.trim()).filter(Boolean);
+  saveConfig(CONFIG);
+  await refresh();
+  toast("Settings applied — scores recomputed.");
+});
+document.getElementById("resetCfgBtn").addEventListener("click", async () => {
+  CONFIG = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+  saveConfig(CONFIG); fillSettings(); await refresh();
+  toast("Settings reset to defaults.");
+});
+
+/* Boot */
+fillSettings();
+refresh();
+</script>
+</body>
+</html>
