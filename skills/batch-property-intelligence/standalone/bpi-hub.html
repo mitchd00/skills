@@ -696,6 +696,7 @@ function recompute(allSales, contacts = []) {
     parcels.push({
       ...s,
       parcelKeyResolved: pk,
+      suburbName: titleCase(s.suburb),
       inSC, nonSaleable, ownerClass, hasSaleRecord,
       yearsSinceSale: Math.round(yearsSinceSale * 10) / 10,
       saleEvents: saleCount.get(pk) || 1,
@@ -709,10 +710,10 @@ function recompute(allSales, contacts = []) {
     if (!p.inSC || p.nonSaleable) continue;
     if (["-","UNKNOWN","","NAN"].includes(p.owner1)) continue;
     let e = portfolio.get(p.owner1);
-    if (!e) { e = { parcels: new Set(), rentals: new Set(), addrs: new Set(), rentalAddrs: new Set() }; portfolio.set(p.owner1, e); }
+    if (!e) { e = { parcels: new Set(), rentals: new Set(), addrs: new Set(), rentalAddrs: new Set(), rentalSuburbs: new Set() }; portfolio.set(p.owner1, e); }
     e.parcels.add(p.parcelKeyResolved);
     e.addrs.add(p.fullAddress);
-    if (p.ownerType === "Rented") { e.rentals.add(p.parcelKeyResolved); e.rentalAddrs.add(p.fullAddress); }
+    if (p.ownerType === "Rented") { e.rentals.add(p.parcelKeyResolved); e.rentalAddrs.add(p.fullAddress); e.rentalSuburbs.add(p.suburbName); }
   }
 
   // 4. Attach counts + score.
@@ -722,7 +723,9 @@ function recompute(allSales, contacts = []) {
     p.ownerRentalCount = e ? e.rentals.size : 0;
     p.ownerPropertyList = e ? Array.from(e.addrs).sort() : [];
     p.ownerProperties = p.ownerPropertyList.join("; ");
-    p.ownerRentals = e ? Array.from(e.rentalAddrs).sort().join("; ") : "";
+    p.ownerRentalList = e ? Array.from(e.rentalAddrs).sort() : [];
+    p.ownerRentals = p.ownerRentalList.join("; ");
+    p.ownerRentalSuburbs = e ? Array.from(e.rentalSuburbs).sort().join(", ") : "";
     p.portfolioInvestor = p.ownerPropertyCount >= 4;
     p.sellerLead = scoreSeller(p);
     p.rentalLead = scoreRental(p);
@@ -933,8 +936,7 @@ function renderDashboard() {
   const saleable = DATASET.filter(p => !p.nonSaleable);
   const high = DATASET.filter(p => p.sellerLead === "HIGH" || p.rentalLead === "HIGH")
                       .sort((a, b) => b.combinedScore - a.combinedScore);
-  const rentals = DATASET.filter(p => p.ownerType === "Rented")
-                         .sort((a, b) => b.combinedScore - a.combinedScore);
+  const rentals = subsetRentalLandlords();
   const filtered = DATASET.filter(p => p.nonSaleable);
 
   // Portfolios (owners with 2+)
@@ -984,7 +986,7 @@ function renderDashboard() {
   `;
 
   document.getElementById("panel-high").innerHTML = leadTable(high);
-  document.getElementById("panel-rentals").innerHTML = leadTable(rentals);
+  document.getElementById("panel-rentals").innerHTML = rentalsTable(rentals);
   document.getElementById("panel-filtered").innerHTML = filteredTable(filtered);
   document.getElementById("panel-portfolios").innerHTML = portfolioTable(portfolios);
   document.getElementById("panel-buyers").innerHTML = buyerTable(BUYERS);
@@ -1013,6 +1015,7 @@ function leadTable(rows) {
       <td>${gradeSpan(p.rentalLead)}</td>
       <td>${enquiryCell(p)}</td>
       <td>${esc(p.fullAddress)}</td>
+      <td>${esc(p.suburbName)}</td>
       <td>${esc(p.owner1)}</td>
       <td>${esc(p.ownerClass)}</td>
       <td style="text-align:center;">${p.ownerPropertyCount}</td>
@@ -1021,7 +1024,7 @@ function leadTable(rows) {
       <td>${esc(p.recommendedAction)}</td>
     </tr>`).join("");
   return `<div class="table-scroll"><table>
-    <thead><tr><th>Score</th><th>Seller</th><th>Rental</th><th>Enquiry</th><th>Address</th><th>Owner</th><th>Class</th><th>Props</th><th>Rentals</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
+    <thead><tr><th>Score</th><th>Seller</th><th>Rental</th><th>Enquiry</th><th>Address</th><th>Suburb</th><th>Owner</th><th>Class</th><th>Props</th><th>Rentals</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 function buyerTable(rows) {
@@ -1056,6 +1059,20 @@ function portfolioTable(rows) {
     <tbody>${body}</tbody></table></div>`;
 }
 
+function rentalsTable(rows) {
+  if (!rows.length) return `<div class="empty">No confirmed rentals yet. Owner Type "Rented" surfaces here, rolled up per landlord.</div>`;
+  const { header, data, fixedCols } = rentalsMatrix(rows);
+  const thead = header.map(h => `<th>${esc(h)}</th>`).join("");
+  const body = data.map(r => "<tr class=\"s" + r[0] + "\">" + r.map((v, i) => {
+    if (i === 0) return `<td class="score">${esc(v)}</td>`;
+    if (i === 4) return `<td style="text-align:center;font-weight:700;">${esc(v)}</td>`;
+    if (i >= fixedCols) return `<td style="font-size:11px;white-space:nowrap;">${esc(v)}</td>`;
+    return `<td>${esc(v)}</td>`;
+  }).join("") + "</tr>").join("");
+  return `<div class="table-scroll"><table>
+    <thead><tr>${thead}</tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+}
 function filteredTable(rows) {
   if (!rows.length) return `<div class="empty">Nothing filtered out.</div>`;
   const body = rows.map(p => `
@@ -1110,7 +1127,7 @@ const EXPORT_COLS = [
   ["combinedScore","Combined Lead Score"],["sellerLead","Seller Lead"],["rentalLead","Rental Lead"],
   ["knownToOffice","Known to Office"],["recentEnquiry","Recent Enquiry"],["enquiryContact","Enquiry Contact"],
   ["enquiryDateStr","Enquiry Date"],["recommendedAction","Recommended Action"],
-  ["fullAddress","Address"],["propertyType","Property Type"],
+  ["fullAddress","Address"],["suburbName","Suburb"],["propertyType","Property Type"],
   ["bed","Bed"],["bath","Bath"],["car","Car"],["landSize","Land Size m2"],["yearBuilt","Year Built"],
   ["owner1","Owner 1"],["ownerClass","Owner Class"],["ownerType","Owner Type"],["jointOwner","Joint Owner"],
   ["owner2","Owner 2"],["postalAddress","Postal Address"],
@@ -1140,6 +1157,20 @@ function portfolioMatrix(rows) {
   });
   return { header, data, fixedCols: 6 };
 }
+// Rentals rollup: top score + landlord + a separate Suburbs column + one
+// "Rental Property N" column per rental (widest landlord sets N).
+function rentalsMatrix(rows) {
+  const maxR = rows.reduce((m, r) => Math.max(m, (r.ownerRentalList || []).length), 0);
+  const header = ["Top Score", "Owner", "Class", "Owner Type", "Rentals", "Suburbs"];
+  for (let i = 1; i <= maxR; i++) header.push("Rental Property " + i);
+  const data = rows.map(r => {
+    const list = r.ownerRentalList || [];
+    const row = [r.rentalTopScore, r.owner1, r.ownerClass, r.ownerType, r.ownerRentalCount, r.ownerRentalSuburbs || ""];
+    for (let i = 0; i < maxR; i++) row.push(list[i] || "");
+    return row;
+  });
+  return { header, data, fixedCols: 6 };
+}
 const FILTERED_COLS = [
   ["fullAddress","Address"],["propertyType","Type"],["owner1","Owner"],["landUse","Land Use"]
 ];
@@ -1156,6 +1187,22 @@ function subsetRentals()  { return DATASET.filter(p => p.ownerType === "Rented")
 function subsetHigh()     { return DATASET.filter(p => p.sellerLead === "HIGH" || p.rentalLead === "HIGH").sort((a, b) => b.combinedScore - a.combinedScore); }
 function subsetAll()      { return DATASET.slice().sort((a, b) => b.combinedScore - a.combinedScore); }
 function subsetFiltered() { return DATASET.filter(p => p.nonSaleable); }
+// Rentals rolled up per landlord: one row per owner with ≥1 rental, carrying
+// their top combined score across those rentals (highest first).
+function subsetRentalLandlords() {
+  const seen = new Map();
+  for (const p of DATASET) {
+    if (p.nonSaleable || p.ownerType !== "Rented") continue;
+    if (["-","UNKNOWN","","NAN"].includes(p.owner1)) continue;
+    const cur = seen.get(p.owner1);
+    if (!cur) seen.set(p.owner1, { parcel: p, top: p.combinedScore });
+    else if (p.combinedScore > cur.top) { cur.top = p.combinedScore; cur.parcel = p; }
+  }
+  const out = [];
+  for (const { parcel, top } of seen.values()) out.push({ ...parcel, rentalTopScore: top });
+  out.sort((a, b) => b.rentalTopScore - a.rentalTopScore || b.ownerRentalCount - a.ownerRentalCount);
+  return out;
+}
 function portfolioProfile(p) {
   if (p.ownerPropertyCount >= 4 && p.ownerRentalCount >= 2) return "Portfolio investor with rentals — top priority";
   if (p.ownerPropertyCount >= 4) return "Portfolio investor — high priority";
@@ -1182,7 +1229,14 @@ function exportCSV(rows, cols, label, fileLabel) {
   toast(`Exported ${rows.length} ${label} to CSV.`);
 }
 const exportSeller     = () => exportCSV(subsetSeller(), EXPORT_COLS, "seller leads", "SellerLeads");
-const exportRentals    = () => exportCSV(subsetRentals(), EXPORT_COLS, "rentals", "Rentals");
+function exportRentals() {
+  const rows = subsetRentalLandlords();
+  if (!rows.length) { toast("No rentals to export."); return; }
+  const { header, data } = rentalsMatrix(rows);
+  const csv = header.map(csvCell).join(",") + "\n" + data.map(r => r.map(csvCell).join(",")).join("\n");
+  downloadBlob(csv, `BPI_Rentals_${stamp()}.csv`, "text/csv;charset=utf-8");
+  toast(`Exported ${rows.length} landlords to CSV.`);
+}
 function exportPortfolios() {
   const rows = subsetPortfolios();
   if (!rows.length) { toast("No portfolios to export."); return; }
@@ -1351,7 +1405,7 @@ function exportWorkbook() {
     buildSummarySheet(),
     sheetFrom("High Priority", subsetHigh(), EXPORT_COLS),
     sheetFrom("Seller Leads", subsetSeller(), EXPORT_COLS),
-    sheetFrom("Rentals", subsetRentals(), EXPORT_COLS),
+    (() => { const rm = rentalsMatrix(subsetRentalLandlords()); return { name: "Rentals", header: rm.header, rows: rm.data.map(r => r.map(cellValue)) }; })(),
     (() => { const pm = portfolioMatrix(subsetPortfolios()); return { name: "Portfolios", header: pm.header, rows: pm.data.map(r => r.map(cellValue)) }; })(),
     sheetFrom("Buyer Leads", BUYERS, BUYER_COLS),
     sheetFrom("All Properties", subsetAll(), EXPORT_COLS),

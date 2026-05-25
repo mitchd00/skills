@@ -92,6 +92,14 @@ EXPORTS
     your RP Data export includes a postal/mailing address
     column, otherwise left blank to fill in later.
 
+  - Rentals tab/export is rolled up per landlord: Top Score
+    (highest first), Owner, Rentals count, a Suburbs column, and
+    each rental property in its OWN column (Rental Property 1,
+    2, ...).
+
+  - Every property list/export also carries a Suburb column next
+    to the address, so you can sort by suburb in Excel.
+
 ================================================================
 EVERY TIME YOU REOPEN IT
 ================================================================
