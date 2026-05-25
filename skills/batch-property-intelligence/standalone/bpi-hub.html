@@ -383,6 +383,9 @@ function csvToSaleRecords(text, sourceName) {
     if (!(req in idx)) throw new Error(`Not an RP Data export — missing "${req}" column.`);
   }
   const get = (r, name) => (idx[name] !== undefined ? (r[idx[name]] || "").trim() : "");
+  // Optional postal/mailing address — RP Data exports vary; blank if absent.
+  const POSTAL_KEYS = ["Postal Address","Mailing Address","Owner Mailing Address","Owner Address","Address for Service","Postal/Mailing Address"];
+  const postalCol = POSTAL_KEYS.find(k => k in idx);
   const records = [];
   for (let i = hi + 1; i < rows.length; i++) {
     const r = rows[i];
@@ -420,6 +423,7 @@ function csvToSaleRecords(text, sourceName) {
       owner2: normName(get(r, "Owner 2 Name")),
       owner3: normName(get(r, "Owner 3 Name")),
       ownerType: get(r, "Owner Type") || "-",
+      postalAddress: postalCol ? get(r, postalCol) : "",
       openInRpData: get(r, "Open in RPData"),
       sourceCsv: sourceName
     };
@@ -716,7 +720,8 @@ function recompute(allSales, contacts = []) {
     const e = portfolio.get(p.owner1);
     p.ownerPropertyCount = e ? e.parcels.size : 0;
     p.ownerRentalCount = e ? e.rentals.size : 0;
-    p.ownerProperties = e ? Array.from(e.addrs).sort().join("; ") : "";
+    p.ownerPropertyList = e ? Array.from(e.addrs).sort() : [];
+    p.ownerProperties = p.ownerPropertyList.join("; ");
     p.ownerRentals = e ? Array.from(e.rentalAddrs).sort().join("; ") : "";
     p.portfolioInvestor = p.ownerPropertyCount >= 4;
     p.sellerLead = scoreSeller(p);
@@ -1038,25 +1043,16 @@ function buyerTable(rows) {
 
 function portfolioTable(rows) {
   if (!rows.length) return `<div class="empty">No owners with 2+ properties yet. Drop more suburb exports to surface cross-suburb portfolios.</div>`;
-  const profile = p => {
-    if (p.ownerPropertyCount >= 4 && p.ownerRentalCount >= 2) return "Portfolio investor with rentals — top priority";
-    if (p.ownerPropertyCount >= 4) return "Portfolio investor — high priority";
-    if (p.ownerRentalCount >= 2) return "Multi-property landlord — PM target";
-    if (p.ownerPropertyCount >= 3) return "Active portfolio holder";
-    if (p.ownerRentalCount >= 1) return "Investor with at least one rental";
-    return "Multi-property owner-occupier";
-  };
-  const body = rows.map(p => `
-    <tr>
-      <td>${esc(p.owner1)}</td>
-      <td>${esc(p.ownerClass)}</td>
-      <td style="text-align:center;font-weight:700;">${p.ownerPropertyCount}</td>
-      <td style="text-align:center;">${p.ownerRentalCount}</td>
-      <td>${esc(profile(p))}</td>
-      <td style="font-size:11px;">${esc(p.ownerProperties)}</td>
-    </tr>`).join("");
+  const { header, data, fixedCols } = portfolioMatrix(rows);
+  const thead = header.map(h => `<th>${esc(h)}</th>`).join("");
+  const body = data.map(r => "<tr>" + r.map((v, i) => {
+    if (i === 2) return `<td style="text-align:center;font-weight:700;">${esc(v)}</td>`;   // Properties
+    if (i === 3) return `<td style="text-align:center;">${esc(v)}</td>`;                    // Rentals
+    if (i >= fixedCols) return `<td style="font-size:11px;white-space:nowrap;">${esc(v)}</td>`;
+    return `<td>${esc(v)}</td>`;
+  }).join("") + "</tr>").join("");
   return `<div class="table-scroll"><table>
-    <thead><tr><th>Owner</th><th>Class</th><th>Properties</th><th>Rentals</th><th>Profile</th><th>Addresses</th></tr></thead>
+    <thead><tr>${thead}</tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 
@@ -1117,7 +1113,8 @@ const EXPORT_COLS = [
   ["fullAddress","Address"],["propertyType","Property Type"],
   ["bed","Bed"],["bath","Bath"],["car","Car"],["landSize","Land Size m2"],["yearBuilt","Year Built"],
   ["owner1","Owner 1"],["ownerClass","Owner Class"],["ownerType","Owner Type"],["jointOwner","Joint Owner"],
-  ["owner2","Owner 2"],["ownerPropertyCount","Owner Property Count"],["ownerRentalCount","Owner Rental Count"],
+  ["owner2","Owner 2"],["postalAddress","Postal Address"],
+  ["ownerPropertyCount","Owner Property Count"],["ownerRentalCount","Owner Rental Count"],
   ["ownerProperties","Owner Properties"],["ownerRentals","Owner Rentals"],["portfolioInvestor","Portfolio Investor"],
   ["saleDateStr","Sale Date"],["salePrice","Sale Price"],["yearsSinceSale","Years Since Sale"],
   ["saleEvents","Sale Events"],["landUse","Land Use"],["developmentZone","Development Zone"],
@@ -1127,10 +1124,22 @@ const BUYER_COLS = [
   ["name","Name"],["email","Email"],["phone","Phone"],["enquiryDateStr","Enquiry Date"],
   ["recentEnquiry","Recent"],["interest","Interest / Property"],["contactType","Type"],["source","Source"]
 ];
-const PORTFOLIO_COLS = [
-  ["owner1","Owner"],["ownerClass","Class"],["ownerPropertyCount","Properties"],
-  ["ownerRentalCount","Rentals"],["profile","Profile"],["ownerProperties","Addresses"]
-];
+// Portfolio rows have a variable number of properties, so columns are built
+// dynamically: one "SC Property N" column per holding (widest owner sets N),
+// plus a Postal Address column (blank unless the export carried one).
+function portfolioMatrix(rows) {
+  const maxProps = rows.reduce((m, r) => Math.max(m, (r.ownerPropertyList || []).length), 0);
+  const header = ["Owner", "Class", "Properties", "Rentals", "Postal Address", "Profile"];
+  for (let i = 1; i <= maxProps; i++) header.push("SC Property " + i);
+  const data = rows.map(r => {
+    const list = r.ownerPropertyList || [];
+    const row = [r.owner1, r.ownerClass, r.ownerPropertyCount, r.ownerRentalCount,
+                 r.postalAddress || "", r.profile || portfolioProfile(r)];
+    for (let i = 0; i < maxProps; i++) row.push(list[i] || "");
+    return row;
+  });
+  return { header, data, fixedCols: 6 };
+}
 const FILTERED_COLS = [
   ["fullAddress","Address"],["propertyType","Type"],["owner1","Owner"],["landUse","Land Use"]
 ];
@@ -1174,7 +1183,14 @@ function exportCSV(rows, cols, label, fileLabel) {
 }
 const exportSeller     = () => exportCSV(subsetSeller(), EXPORT_COLS, "seller leads", "SellerLeads");
 const exportRentals    = () => exportCSV(subsetRentals(), EXPORT_COLS, "rentals", "Rentals");
-const exportPortfolios = () => exportCSV(subsetPortfolios(), PORTFOLIO_COLS, "portfolios", "Portfolios");
+function exportPortfolios() {
+  const rows = subsetPortfolios();
+  if (!rows.length) { toast("No portfolios to export."); return; }
+  const { header, data } = portfolioMatrix(rows);
+  const csv = header.map(csvCell).join(",") + "\n" + data.map(r => r.map(csvCell).join(",")).join("\n");
+  downloadBlob(csv, `BPI_Portfolios_${stamp()}.csv`, "text/csv;charset=utf-8");
+  toast(`Exported ${rows.length} portfolios to CSV.`);
+}
 const exportHigh       = () => exportCSV(subsetHigh(), EXPORT_COLS, "high-priority leads", "HighPriority");
 const exportAll        = () => exportCSV(subsetAll(), EXPORT_COLS, "parcels", "AllProperties");
 const exportBuyers     = () => exportCSV(BUYERS, BUYER_COLS, "buyer leads", "BuyerLeads");
@@ -1336,7 +1352,7 @@ function exportWorkbook() {
     sheetFrom("High Priority", subsetHigh(), EXPORT_COLS),
     sheetFrom("Seller Leads", subsetSeller(), EXPORT_COLS),
     sheetFrom("Rentals", subsetRentals(), EXPORT_COLS),
-    sheetFrom("Portfolios", subsetPortfolios(), PORTFOLIO_COLS),
+    (() => { const pm = portfolioMatrix(subsetPortfolios()); return { name: "Portfolios", header: pm.header, rows: pm.data.map(r => r.map(cellValue)) }; })(),
     sheetFrom("Buyer Leads", BUYERS, BUYER_COLS),
     sheetFrom("All Properties", subsetAll(), EXPORT_COLS),
     sheetFrom("Filtered Out", subsetFiltered(), FILTERED_COLS)

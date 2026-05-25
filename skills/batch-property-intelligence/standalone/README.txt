@@ -86,6 +86,12 @@ EXPORTS
   - Targeted CSV buttons: Seller Leads, Rentals, Portfolios,
     High Priority, Buyer Leads, All Properties.
 
+  - Portfolios tab/export lists each of an owner's Sunshine
+    Coast holdings in its OWN column (SC Property 1, SC Property
+    2, ...). It also has a Postal Address column — populated if
+    your RP Data export includes a postal/mailing address
+    column, otherwise left blank to fill in later.
+
 ================================================================
 EVERY TIME YOU REOPEN IT
 ================================================================
