@@ -136,7 +136,7 @@
     <h2>Drop RP Data CSV export(s) here</h2>
     <p>or <span class="browse">click to browse</span></p>
     <p class="muted">Each CSV is added to a local database in your browser. Scores recompute across everything you've dropped — cross-suburb portfolios light up automatically. Drop the same file twice and it de-duplicates.</p>
-    <input type="file" id="fileInput" accept=".csv" multiple hidden>
+    <input type="file" id="fileInput" multiple hidden>
   </div>
 
   <div class="toolbar">
@@ -605,8 +605,11 @@ async function getRuns() {
 let DATASET = [];   // last recompute result
 
 async function ingestFiles(fileList) {
-  const files = Array.from(fileList).filter(f => /\.csv$/i.test(f.name));
-  if (!files.length) { toast("No CSV files selected."); return; }
+  // Accept whatever the user picks/drops — the parser validates it's an RP Data
+  // export and reports a clear error otherwise. (Don't pre-filter on extension:
+  // OneDrive and some exports don't surface a clean .csv name.)
+  const files = Array.from(fileList);
+  if (!files.length) { toast("No files selected."); return; }
   let totalNew = 0, totalRows = 0, errors = [];
   for (const file of files) {
     try {
