@@ -112,6 +112,13 @@ EXPORTS
   - Targeted CSV buttons: Warm Sellers, Holding (Pending RP Data),
     Seller Leads, Rentals, Portfolios, High Priority, All Properties.
 
+  - SUBURB FILTER: the "Suburb" dropdown in the Exports bar limits
+    EVERY export (warm sellers, all the leads lists, rentals,
+    portfolios, holding, and the complete workbook) to a single
+    suburb — handy for handing an agent just their patch. Leave it
+    on "All suburbs" for the full set. The chosen suburb is added
+    to the file name.
+
   - Portfolios tab/export lists each of an owner's Sunshine
     Coast holdings in its OWN column (SC Property 1, SC Property
     2, ...). It also has a Postal Address column — populated if

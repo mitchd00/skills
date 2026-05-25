@@ -166,6 +166,11 @@
 
   <div class="toolbar" id="exportBar">
     <span class="memchip" style="background:var(--elite-black);color:var(--warm-white);">Exports</span>
+    <label style="font-size:13px;font-weight:600;">Suburb:
+      <select id="suburbFilter" style="padding:5px;border:1px solid #ccc;border-radius:4px;margin-left:4px;">
+        <option value="">All suburbs</option>
+      </select>
+    </label>
     <button class="primary" id="exportWorkbookBtn">Complete workbook (Excel, all tabs)</button>
     <button id="exportSellerBtn">Seller Leads (CSV)</button>
     <button id="exportRentalsBtn">Rentals (CSV)</button>
@@ -1141,6 +1146,16 @@ function renderDashboard() {
   document.getElementById("panel-review").innerHTML = reviewTable(REVIEW);
   document.getElementById("panel-holding").innerHTML = holdingTable(HOLDING);
   renderAllPanel(DATASET);
+  populateSuburbFilter();
+}
+function populateSuburbFilter() {
+  const sel = document.getElementById("suburbFilter");
+  if (!sel) return;
+  const prev = sel.value;
+  const subs = Array.from(new Set(DATASET.map(p => p.suburbName).filter(Boolean))).sort();
+  sel.innerHTML = `<option value="">All suburbs</option>` +
+    subs.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("");
+  if (subs.includes(prev)) sel.value = prev;
 }
 
 function card(num, label) { return `<div class="stat"><div class="num">${num}</div><div class="label">${label}</div></div>`; }
@@ -1423,33 +1438,35 @@ function subsetPortfolios() {
   return out;
 }
 
-/* ── per-list CSV exports ── */
+/* ── suburb filter (export bar) ── */
+function exSuburb() { const el = document.getElementById("suburbFilter"); return el ? el.value : ""; }
+function subSuffix() { const s = exSuburb(); return s ? "_" + s.replace(/[^A-Za-z0-9]+/g, "") : ""; }
+function subLabel() { const s = exSuburb(); return s ? ` in ${s}` : ""; }
+function parcelsInSuburb(rows)   { const s = exSuburb(); return s ? rows.filter(p => p.suburbName === s) : rows; }
+function landlordsInSuburb(rows) { const s = exSuburb(); return s ? rows.filter(r => r.suburbName === s || (r.ownerRentalSuburbs || "").split(/;\s*/).includes(s) || (r.ownerRentalList || []).some(a => a.includes(s))) : rows; }
+function portfoliosInSuburb(rows){ const s = exSuburb(); return s ? rows.filter(r => r.suburbName === s || (r.ownerPropertyList || []).some(a => a.includes(s))) : rows; }
+function holdingInSuburb(rows)   { const s = exSuburb(); return s ? rows.filter(c => (c.interest || "").toLowerCase().includes(s.toLowerCase())) : rows; }
+
+/* ── per-list CSV exports (respect the suburb filter) ── */
 function exportCSV(rows, cols, label, fileLabel) {
-  if (!rows.length) { toast(`No ${label} to export.`); return; }
-  downloadBlob(rowsToCSV(rows, cols), `BPI_${fileLabel}_${stamp()}.csv`, "text/csv;charset=utf-8");
-  toast(`Exported ${rows.length} ${label} to CSV.`);
+  if (!rows.length) { toast(`No ${label}${subLabel()} to export.`); return; }
+  downloadBlob(rowsToCSV(rows, cols), `BPI_${fileLabel}${subSuffix()}_${stamp()}.csv`, "text/csv;charset=utf-8");
+  toast(`Exported ${rows.length} ${label}${subLabel()} to CSV.`);
 }
-const exportSeller     = () => exportCSV(subsetSeller(), EXPORT_COLS, "seller leads", "SellerLeads");
-function exportRentals() {
-  const rows = subsetRentalLandlords();
-  if (!rows.length) { toast("No rentals to export."); return; }
-  const { header, data } = rentalsMatrix(rows);
+function exportMatrix(rows, matrixFn, label, fileLabel) {
+  if (!rows.length) { toast(`No ${label}${subLabel()} to export.`); return; }
+  const { header, data } = matrixFn(rows);
   const csv = header.map(csvCell).join(",") + "\n" + data.map(r => r.map(csvCell).join(",")).join("\n");
-  downloadBlob(csv, `BPI_Rentals_${stamp()}.csv`, "text/csv;charset=utf-8");
-  toast(`Exported ${rows.length} landlords to CSV.`);
+  downloadBlob(csv, `BPI_${fileLabel}${subSuffix()}_${stamp()}.csv`, "text/csv;charset=utf-8");
+  toast(`Exported ${rows.length} ${label}${subLabel()} to CSV.`);
 }
-function exportPortfolios() {
-  const rows = subsetPortfolios();
-  if (!rows.length) { toast("No portfolios to export."); return; }
-  const { header, data } = portfolioMatrix(rows);
-  const csv = header.map(csvCell).join(",") + "\n" + data.map(r => r.map(csvCell).join(",")).join("\n");
-  downloadBlob(csv, `BPI_Portfolios_${stamp()}.csv`, "text/csv;charset=utf-8");
-  toast(`Exported ${rows.length} portfolios to CSV.`);
-}
-const exportHigh       = () => exportCSV(subsetHigh(), EXPORT_COLS, "high-priority leads", "HighPriority");
-const exportAll        = () => exportCSV(subsetAll(), EXPORT_COLS, "parcels", "AllProperties");
-const exportWarm       = () => exportCSV(WARM, WARM_COLS, "warm sellers", "WarmSellers");
-const exportHolding    = () => exportCSV(HOLDING, HOLDING_COLS, "holding enquirers", "Holding_PendingRPData");
+const exportSeller     = () => exportCSV(parcelsInSuburb(subsetSeller()), EXPORT_COLS, "seller leads", "SellerLeads");
+const exportRentals    = () => exportMatrix(landlordsInSuburb(subsetRentalLandlords()), rentalsMatrix, "landlords", "Rentals");
+const exportPortfolios = () => exportMatrix(portfoliosInSuburb(subsetPortfolios()), portfolioMatrix, "portfolios", "Portfolios");
+const exportHigh       = () => exportCSV(parcelsInSuburb(subsetHigh()), EXPORT_COLS, "high-priority leads", "HighPriority");
+const exportAll        = () => exportCSV(parcelsInSuburb(subsetAll()), EXPORT_COLS, "parcels", "AllProperties");
+const exportWarm       = () => exportCSV(parcelsInSuburb(WARM), WARM_COLS, "warm sellers", "WarmSellers");
+const exportHolding    = () => exportCSV(holdingInSuburb(HOLDING), HOLDING_COLS, "holding enquirers", "Holding_PendingRPData");
 
 /* ── minimal in-browser .xlsx writer (zip of XML, store method) ── */
 const CRC32_TABLE = (() => {
@@ -1605,19 +1622,19 @@ function exportWorkbook() {
   if (!DATASET.length) { toast("Nothing to export."); return; }
   const sheets = [
     buildSummarySheet(),
-    sheetFrom("Warm Sellers", WARM, WARM_COLS),
-    sheetFrom("High Priority", subsetHigh(), EXPORT_COLS),
-    sheetFrom("Seller Leads", subsetSeller(), EXPORT_COLS),
-    (() => { const rm = rentalsMatrix(subsetRentalLandlords()); return { name: "Rentals", header: rm.header, rows: rm.data.map(r => r.map(cellValue)) }; })(),
-    (() => { const pm = portfolioMatrix(subsetPortfolios()); return { name: "Portfolios", header: pm.header, rows: pm.data.map(r => r.map(cellValue)) }; })(),
-    sheetFrom("All Properties", subsetAll(), EXPORT_COLS),
-    sheetFrom("Holding Pending RP Data", HOLDING, HOLDING_COLS),
-    sheetFrom("Filtered Out", subsetFiltered(), FILTERED_COLS)
+    sheetFrom("Warm Sellers", parcelsInSuburb(WARM), WARM_COLS),
+    sheetFrom("High Priority", parcelsInSuburb(subsetHigh()), EXPORT_COLS),
+    sheetFrom("Seller Leads", parcelsInSuburb(subsetSeller()), EXPORT_COLS),
+    (() => { const rm = rentalsMatrix(landlordsInSuburb(subsetRentalLandlords())); return { name: "Rentals", header: rm.header, rows: rm.data.map(r => r.map(cellValue)) }; })(),
+    (() => { const pm = portfolioMatrix(portfoliosInSuburb(subsetPortfolios())); return { name: "Portfolios", header: pm.header, rows: pm.data.map(r => r.map(cellValue)) }; })(),
+    sheetFrom("All Properties", parcelsInSuburb(subsetAll()), EXPORT_COLS),
+    sheetFrom("Holding Pending RP Data", holdingInSuburb(HOLDING), HOLDING_COLS),
+    sheetFrom("Filtered Out", parcelsInSuburb(subsetFiltered()), FILTERED_COLS)
   ];
   const bytes = buildXlsx(sheets);
-  downloadBlob(bytes, `BPI_Master_Dashboard_${stamp()}.xlsx`,
+  downloadBlob(bytes, `BPI_Master_Dashboard${subSuffix()}_${stamp()}.xlsx`,
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  toast("Exported complete workbook (9 tabs) to Excel.");
+  toast(`Exported workbook (9 tabs)${subLabel()} to Excel.`);
 }
 
 /* ───────────────────────── UI wiring ───────────────────────── */
