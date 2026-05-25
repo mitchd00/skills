@@ -51,6 +51,15 @@
   .dropzone .browse { color: var(--muted-gold); text-decoration: underline; font-weight: 600; }
   .dropzone.lockedon { padding: 20px; margin-top: -8px; border-color: #7a6a44; background: #fffdf8; }
   .dropzone.lockedon h2 { font-size: 14px; }
+  .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 1000; align-items: center; justify-content: center; }
+  .modal-backdrop.show { display: flex; }
+  .modal { background: var(--warm-white); border: 1px solid var(--elite-black); border-radius: 8px; padding: 24px; width: 92%; max-width: 560px; max-height: 85vh; overflow: auto; box-shadow: 0 12px 40px rgba(0,0,0,.3); }
+  .modal h3 { margin: 0 0 4px; color: var(--elite-black); }
+  .modal .map-row { display: grid; grid-template-columns: 180px 1fr; gap: 10px; align-items: center; margin: 8px 0; }
+  .modal .map-row label { font-size: 13px; font-weight: 600; }
+  .modal select { width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
+  .modal .uncertain { color: #b00020; font-weight: 700; }
+  .modal-actions { margin-top: 18px; display: flex; gap: 8px; }
 
   .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 16px 0; }
   button {
@@ -142,9 +151,9 @@
   </div>
 
   <div class="dropzone lockedon" id="lockedonZone">
-    <h2>Drop LockedOn enquiry export here</h2>
+    <h2>Drop enquiry export here — LockedOn or RP Data</h2>
     <p>or <span class="browse">click to browse</span></p>
-    <p class="muted">A CSV of contacts/enquiries from LockedOn. Names that match a property owner become a <b>warm seller signal</b> (boosts their score). Names that don't match become <b>Buyer Leads</b>. Auto-detects common LockedOn column names.</p>
+    <p class="muted">A CSV of enquiries (LockedOn or RP Data — columns auto-detected). Any enquirer who <b>also owns a current Sunshine Coast property</b> in your database is flagged a <b>warm seller</b> (highlighted, +2 points). Enquirers not yet matched go to the <b>Holding</b> tab, ready to cross-check against RP Data later.</p>
     <input type="file" id="lockedonInput" multiple hidden>
   </div>
 
@@ -162,7 +171,8 @@
     <button id="exportRentalsBtn">Rentals (CSV)</button>
     <button id="exportPortfoliosBtn">Portfolios (CSV)</button>
     <button id="exportHighBtn">High Priority (CSV)</button>
-    <button id="exportBuyersBtn">Buyer Leads (CSV)</button>
+    <button id="exportWarmBtn">Warm Sellers (CSV)</button>
+    <button id="exportHoldingBtn">Holding · Pending RP Data (CSV)</button>
     <button id="exportAllBtn">All Properties (CSV)</button>
   </div>
 
@@ -220,7 +230,8 @@
       <button class="tab" data-tab="high">High Priority <span class="count" id="cnt-high"></span></button>
       <button class="tab" data-tab="portfolios">Portfolios <span class="count" id="cnt-portfolios"></span></button>
       <button class="tab" data-tab="rentals">Rentals <span class="count" id="cnt-rentals"></span></button>
-      <button class="tab" data-tab="buyers">Buyer Leads <span class="count" id="cnt-buyers"></span></button>
+      <button class="tab" data-tab="warm">Warm Sellers <span class="count" id="cnt-warm"></span></button>
+      <button class="tab" data-tab="holding">Holding · Pending RP Data <span class="count" id="cnt-holding"></span></button>
       <button class="tab" data-tab="all">All Properties <span class="count" id="cnt-all"></span></button>
       <button class="tab" data-tab="filtered">Filtered Out <span class="count" id="cnt-filtered"></span></button>
     </div>
@@ -229,7 +240,8 @@
     <div class="panel" id="panel-high"></div>
     <div class="panel" id="panel-portfolios"></div>
     <div class="panel" id="panel-rentals"></div>
-    <div class="panel" id="panel-buyers"></div>
+    <div class="panel" id="panel-warm"></div>
+    <div class="panel" id="panel-holding"></div>
     <div class="panel" id="panel-all"></div>
     <div class="panel" id="panel-filtered"></div>
     <div class="panel" id="panel-search"></div>
@@ -239,6 +251,18 @@
     <p>No data yet. Drop an RP Data CSV above to begin.</p>
   </div>
 
+</div>
+
+<div class="modal-backdrop" id="mapModal">
+  <div class="modal">
+    <h3>Confirm column mapping</h3>
+    <p class="muted" id="mapSubtitle"></p>
+    <div id="mapRows"></div>
+    <div class="modal-actions">
+      <button class="primary" id="mapImport">Import with these columns</button>
+      <button id="mapCancel">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -447,25 +471,36 @@ const LO_FIELDS = {
   name:    ["contact name", "full name", "name", "contact", "client", "lead name"],
   email:   ["email", "e-mail"],
   phone:   ["mobile", "phone", "telephone", "contact number"],
-  date:    ["enquiry date", "date of enquiry", "created", "date added", "added", "last activity", "last contact", "date"],
-  interest:["property", "address", "interest", "enquiry", "enquired about", "listing", "notes", "comment"],
-  type:    ["contact type", "type", "category", "status", "source"]
+  date:    ["enquiry date", "date of enquiry", "received at", "received date", "received", "created", "date added", "added", "last activity", "last contact", "date"],
+  interest:["listing address", "property", "address", "interest", "enquiry", "enquired about", "listing", "notes", "comment"],
+  type:    ["enquiry type", "contact type", "type", "category", "status", "source"]
 };
-function findCol(header, synonyms) {
+// Returns {idx, method} where method is "exact" | "fuzzy" | "none".
+function findColDetailed(header, synonyms) {
   const lower = header.map(h => h.toLowerCase().trim());
   for (const syn of synonyms) {
-    const i = lower.findIndex(h => h === syn);
-    if (i !== -1) return i;
+    const i = lower.indexOf(syn);
+    if (i !== -1) return { idx: i, method: "exact" };
   }
   for (const syn of synonyms) {
     const i = lower.findIndex(h => h.includes(syn));
-    if (i !== -1) return i;
+    if (i !== -1) return { idx: i, method: "fuzzy" };
   }
-  return -1;
+  return { idx: -1, method: "none" };
+}
+function detectContactColumns(header) {
+  const col = {}, method = {};
+  for (const [field, syns] of Object.entries(LO_FIELDS)) {
+    const r = findColDetailed(header, syns);
+    col[field] = r.idx; method[field] = r.method;
+  }
+  return { col, method };
 }
 function parseAnyDate(s) {
   if (!s) return null;
-  const t = String(s).trim();
+  let t = String(s).trim();
+  // strip a trailing time component: "23/05/2026, 8:25 am" → "23/05/2026"
+  if (t.includes(",")) t = t.split(",")[0].trim();
   let d = parseSaleDate(t);            // handles "09 Nov 2000"
   if (d) return d;
   // dd/mm/yyyy or dd-mm-yyyy (Australian)
@@ -479,24 +514,7 @@ function parseAnyDate(s) {
   return isNaN(d) ? null : d;
 }
 
-// Parse a LockedOn CSV into contact records. Returns {records, detected}.
-function csvToContacts(text, sourceName) {
-  const rows = parseCSV(text).filter(r => r.some(c => (c || "").trim() !== ""));
-  if (!rows.length) throw new Error("Empty file.");
-  const header = rows[0].map(h => h.trim());
-  const col = {
-    first: findCol(header, LO_FIELDS.first),
-    last:  findCol(header, LO_FIELDS.last),
-    name:  findCol(header, LO_FIELDS.name),
-    email: findCol(header, LO_FIELDS.email),
-    phone: findCol(header, LO_FIELDS.phone),
-    date:  findCol(header, LO_FIELDS.date),
-    interest: findCol(header, LO_FIELDS.interest),
-    type:  findCol(header, LO_FIELDS.type)
-  };
-  if (col.name === -1 && col.last === -1 && col.first === -1) {
-    throw new Error("Could not find a name column in this LockedOn export.");
-  }
+function parseContactRows(rows, col, sourceName) {
   const at = (r, i) => (i >= 0 && i < r.length ? (r[i] || "").trim() : "");
   const records = [];
   for (let i = 1; i < rows.length; i++) {
@@ -520,8 +538,23 @@ function csvToContacts(text, sourceName) {
     rec.k = `${name.toUpperCase()}|${rec.email.toUpperCase()}|${rec.enquiryDateMs || ""}`;
     records.push(rec);
   }
-  const detected = Object.entries(col).filter(([, v]) => v !== -1).map(([k, v]) => `${k}→"${header[v]}"`);
-  return { records, detected };
+  return records;
+}
+// Parse an enquiry CSV (LockedOn or RP Data). Pass overrideCol to use a
+// user-confirmed mapping; otherwise columns are auto-detected.
+// Returns {records, detected, header, col, method}.
+function csvToContacts(text, sourceName, overrideCol) {
+  const rows = parseCSV(text).filter(r => r.some(c => (c || "").trim() !== ""));
+  if (!rows.length) throw new Error("Empty file.");
+  const header = rows[0].map(h => h.trim());
+  const det = detectContactColumns(header);
+  const col = overrideCol || det.col;
+  if (col.name === -1 && col.last === -1 && col.first === -1) {
+    throw new Error("Could not find a name column in this enquiry export.");
+  }
+  const records = parseContactRows(rows, col, sourceName);
+  const detected = Object.entries(col).filter(([, v]) => v !== -1 && v != null).map(([k, v]) => `${k}→"${header[v]}"`);
+  return { records, detected, header, col, method: det.method };
 }
 
 // Tokenise a person name to a set of comparable alpha tokens (≥2 chars).
@@ -590,11 +623,13 @@ function combine(seller, rental) {
   return SCORE_MATRIX[`${seller}|${rental}`] || [1, "Skip"];
 }
 
-/* Enquiry matching — link LockedOn contacts to owners and to buyer leads. */
+/* Enquiry matching — link LockedOn contacts to CURRENT SUNSHINE COAST owners.
+   A contact only counts as a warm seller if they own a current SC property,
+   so the owner index is restricted to in-SC, saleable, known owners. */
 function buildOwnerIndex(parcels) {
   const owners = new Map();          // owner name → token Set
   for (const p of parcels) {
-    if (p.nonSaleable) continue;
+    if (!p.inSC || p.nonSaleable) continue;
     if (["-","UNKNOWN","","NAN"].includes(p.owner1)) continue;
     if (!owners.has(p.owner1)) owners.set(p.owner1, nameTokens(p.owner1));
   }
@@ -639,33 +674,43 @@ function applyEnquiryData(parcels, contacts) {
     p.enquiryDateStr = c.enquiryDateStr || "";
     p.enquiryDateMs = c.enquiryDateMs;
     p.recentEnquiry = c.enquiryDateMs ? (now - c.enquiryDateMs) <= windowMs : false;
-    if (p.recentEnquiry && !p.nonSaleable) {
+    // Owns a current SC property AND enquired → warm seller: highlight + boost.
+    if (p.inSC && !p.nonSaleable) {
+      p.warmSeller = true;
       const before = p.combinedScore;
       p.combinedScore = Math.min(10, p.combinedScore + boost);
       p.enquiryBoost = p.combinedScore - before;
-      p.recommendedAction = (p.recommendedAction || "") + " — recent enquiry on file (warm); contact directly.";
+      p.recommendedAction = (p.recommendedAction || "") +
+        ` — WARM SELLER: enquired in LockedOn (${c.enquiryDateStr || "date n/a"}) & owns an SC property; contact directly.`;
     }
   }
 }
-// Buyer leads = LockedOn contacts that did NOT match any owner, deduped, most-recent first.
-function computeBuyerLeads(contacts, parcels) {
+// Warm sellers = current SC owners who appear as a LockedOn enquirer, deduped
+// per owner (best-scoring parcel), highest score first.
+function computeWarmSellers(parcels) {
+  const seen = new Map();
+  for (const p of parcels) {
+    if (!p.warmSeller) continue;
+    const cur = seen.get(p.owner1);
+    if (!cur || p.combinedScore > cur.combinedScore) seen.set(p.owner1, p);
+  }
+  return Array.from(seen.values()).sort((a, b) =>
+    (b.recentEnquiry - a.recentEnquiry) || (b.combinedScore - a.combinedScore));
+}
+// Holding spot — enquirers NOT confirmed as a current SC owner (either not in the
+// database, or owns nothing on the Coast). Kept so they can be cross-checked
+// against RP Data later. Deduped per person, most recent enquiry first.
+function computeHolding(contacts, parcels) {
   if (!contacts || !contacts.length) return [];
   const index = buildOwnerIndex(parcels);
-  const now = Date.now();
-  const windowMs = (CONFIG.enquiry_window_months || 6) * 30.44 * 864e5;
   const byPerson = new Map();
   for (const c of contacts) {
-    if (ownersMatchingContact(c, index).length) continue;   // matched an owner → not a buyer lead
-    const key = (c.name.toUpperCase() + "|" + (c.email || "").toUpperCase());
+    if (ownersMatchingContact(c, index).length) continue;   // matched a current SC owner → warm seller, not holding
+    const key = c.name.toUpperCase() + "|" + (c.email || "").toUpperCase();
     const prev = byPerson.get(key);
     if (!prev || (c.enquiryDateMs || 0) > (prev.enquiryDateMs || 0)) byPerson.set(key, c);
   }
-  const buyers = Array.from(byPerson.values()).map(c => ({
-    ...c,
-    recentEnquiry: c.enquiryDateMs ? (now - c.enquiryDateMs) <= windowMs : false
-  }));
-  buyers.sort((a, b) => (b.enquiryDateMs || 0) - (a.enquiryDateMs || 0));
-  return buyers;
+  return Array.from(byPerson.values()).sort((a, b) => (b.enquiryDateMs || 0) - (a.enquiryDateMs || 0));
 }
 
 // Full recompute across all stored sale records → array of scored current-owner parcels.
@@ -733,6 +778,7 @@ function recompute(allSales, contacts = []) {
     p.combinedScore = score;
     p.recommendedAction = action;
     p.knownToOffice = false;
+    p.warmSeller = false;
     p.recentEnquiry = false;
     p.enquiryContact = "";
     p.enquiryDateStr = "";
@@ -854,27 +900,70 @@ async function getRuns() {
 /* ───────────────────────── App state + rendering ───────────────────────── */
 
 let DATASET = [];   // last recompute result (scored parcels)
-let BUYERS = [];    // last computed buyer leads
+let WARM = [];      // current SC owners who enquired (warm sellers)
+let HOLDING = [];   // enquirers not yet confirmed as SC owners (pending RP Data)
 
+const MAP_FIELDS = [
+  ["name", "Name"], ["first", "First name"], ["last", "Last name"],
+  ["email", "Email"], ["phone", "Phone"], ["date", "Enquiry date"],
+  ["interest", "Property enquired on"], ["type", "Enquiry type"]
+];
+// Show the detected column mapping for approval; resolves to a confirmed col
+// map, or false if cancelled.
+function showMappingDialog(fileName, header, col, method) {
+  return new Promise(resolve => {
+    const modal = document.getElementById("mapModal");
+    document.getElementById("mapSubtitle").innerHTML =
+      `<b>${esc(fileName)}</b> — columns matched automatically. Anything flagged <span class="uncertain">(check)</span> was matched loosely; confirm or correct it, then import.`;
+    const options = sel => ['<option value="-1">— none —</option>']
+      .concat(header.map((h, i) => `<option value="${i}" ${i === sel ? "selected" : ""}>${esc(h)}</option>`)).join("");
+    document.getElementById("mapRows").innerHTML = MAP_FIELDS.map(([f, label]) => {
+      const flag = method[f] === "fuzzy" ? ' <span class="uncertain" title="matched loosely">(check)</span>' : "";
+      const sel = (col[f] === undefined ? -1 : col[f]);
+      return `<div class="map-row"><label>${label}${flag}</label><select data-field="${f}">${options(sel)}</select></div>`;
+    }).join("");
+    modal.classList.add("show");
+    const imp = document.getElementById("mapImport"), can = document.getElementById("mapCancel");
+    const done = result => { modal.classList.remove("show"); imp.onclick = null; can.onclick = null; resolve(result); };
+    imp.onclick = () => {
+      const map = {};
+      modal.querySelectorAll("select[data-field]").forEach(s => { map[s.dataset.field] = parseInt(s.value, 10); });
+      done(map);
+    };
+    can.onclick = () => done(false);
+  });
+}
+// A mapping is "uncertain" when the name or date column was matched loosely
+// (substring) or not at all — in that case we ask the user to approve it.
+function mappingUncertain(parsed) {
+  if (parsed.col.name === -1) return true;          // relying on first/last fallback
+  return parsed.method.name !== "exact" || parsed.method.date !== "exact";
+}
 async function ingestLockedOn(fileList) {
   const files = Array.from(fileList);
   if (!files.length) { toast("No files selected."); return; }
-  let totalNew = 0, totalRows = 0, errors = [], detectedMsg = "";
+  let totalNew = 0, totalRows = 0, errors = [], detectedMsg = "", cancelled = 0;
   for (const file of files) {
     try {
       const text = await file.text();
-      const { records, detected } = csvToContacts(text, file.name);
-      const { added } = await putContacts(records);
-      totalNew += added; totalRows += records.length;
-      detectedMsg = detected.join(", ");
+      let parsed = csvToContacts(text, file.name);
+      if (mappingUncertain(parsed)) {
+        const confirmed = await showMappingDialog(file.name, parsed.header, parsed.col, parsed.method);
+        if (!confirmed) { cancelled++; continue; }
+        parsed = csvToContacts(text, file.name, confirmed);
+      }
+      const { added } = await putContacts(parsed.records);
+      totalNew += added; totalRows += parsed.records.length;
+      detectedMsg = parsed.detected.join(", ");
     } catch (e) {
       errors.push(`${file.name}: ${e.message}`);
     }
   }
   await refresh();
   await autosave();
-  if (errors.length) toast("LockedOn import issues:\n" + errors.join("\n"));
-  else toast(`Loaded ${totalRows} LockedOn contacts (${totalNew} new). Detected: ${detectedMsg}`);
+  if (errors.length) toast("Enquiry import issues:\n" + errors.join("\n"));
+  else if (totalRows) toast(`Loaded ${totalRows} enquiries (${totalNew} new). Mapped: ${detectedMsg}`);
+  else if (cancelled) toast("Import cancelled.");
 }
 
 async function ingestFiles(fileList) {
@@ -906,22 +995,22 @@ async function refresh() {
   const contacts = await getAllContacts();
   const runs = await getRuns();
   if (!allSales.length && !contacts.length) {
-    DATASET = []; BUYERS = [];
+    DATASET = []; WARM = []; HOLDING = [];
     document.getElementById("dashboard").style.display = "none";
     document.getElementById("emptyState").style.display = "block";
     document.getElementById("dbstat").textContent = "Database empty";
     return;
   }
   DATASET = recompute(allSales, contacts);
-  BUYERS = computeBuyerLeads(contacts, DATASET);
+  WARM = computeWarmSellers(DATASET);
+  HOLDING = computeHolding(contacts, DATASET);
   document.getElementById("emptyState").style.display = "none";
   document.getElementById("dashboard").style.display = "block";
 
   const parcels = DATASET.length;
   const owners = new Set(DATASET.filter(p => !["-","UNKNOWN","","NAN"].includes(p.owner1)).map(p => p.owner1)).size;
-  const enquiryMatches = DATASET.filter(p => p.knownToOffice).length;
   const contactBit = contacts.length
-    ? ` · <b>${contacts.length}</b> LockedOn contacts (<b>${enquiryMatches}</b> owner matches)`
+    ? ` · <b>${contacts.length}</b> enquiries (<b>${WARM.length}</b> warm sellers · <b>${HOLDING.length}</b> holding)`
     : "";
   document.getElementById("dbstat").innerHTML =
     `<b>${allSales.length}</b> sales · <b>${parcels}</b> parcels · <b>${owners}</b> owners · <b>${runs.count}</b> ingests${contactBit}`;
@@ -955,21 +1044,20 @@ function renderDashboard() {
   const owners2 = new Set(saleable.filter(p => p.ownerPropertyCount >= 2).map(p => p.owner1)).size;
   const owners4 = new Set(saleable.filter(p => p.ownerPropertyCount >= 4).map(p => p.owner1)).size;
   const confirmedRentals = saleable.filter(p => p.ownerType === "Rented").length;
-  const warmOwners = saleable.filter(p => p.recentEnquiry).length;
-
   document.getElementById("statGrid").innerHTML = [
     card(DATASET.length, "Total parcels"),
     card(high.length, "High-priority leads"),
+    card(WARM.length, "Warm sellers (enquired + own SC)"),
     card(confirmedRentals, "Confirmed rentals"),
     card(owners2, "Multi-property owners"),
-    card(warmOwners, "Warm (recent enquiry)"),
-    card(BUYERS.length, "Buyer leads"),
+    card(owners4, "Portfolio investors (4+)"),
   ].join("");
 
   setCount("high", high.length);
   setCount("portfolios", portfolios.length);
   setCount("rentals", rentals.length);
-  setCount("buyers", BUYERS.length);
+  setCount("warm", WARM.length);
+  setCount("holding", HOLDING.length);
   setCount("all", DATASET.length);
   setCount("filtered", filtered.length);
 
@@ -989,7 +1077,8 @@ function renderDashboard() {
   document.getElementById("panel-rentals").innerHTML = rentalsTable(rentals);
   document.getElementById("panel-filtered").innerHTML = filteredTable(filtered);
   document.getElementById("panel-portfolios").innerHTML = portfolioTable(portfolios);
-  document.getElementById("panel-buyers").innerHTML = buyerTable(BUYERS);
+  document.getElementById("panel-warm").innerHTML = warmTable(WARM);
+  document.getElementById("panel-holding").innerHTML = holdingTable(HOLDING);
   renderAllPanel(DATASET);
 }
 
@@ -1002,8 +1091,10 @@ function distTable(title, rows) {
 }
 
 function enquiryCell(p) {
-  if (p.recentEnquiry) return `<span class="grade HIGH" title="${esc(p.enquiryContact)}">● ${esc(p.enquiryDateStr || "recent")}</span>`;
-  if (p.knownToOffice) return `<span class="muted" title="${esc(p.enquiryContact)}">on file</span>`;
+  if (p.warmSeller) {
+    const tag = p.recentEnquiry ? "★ WARM" : "★ warm";
+    return `<span class="grade HIGH" title="Enquired: ${esc(p.enquiryContact)} (${esc(p.enquiryDateStr || "date n/a")})">${tag} ${esc(p.enquiryDateStr || "")}</span>`;
+  }
   return "";
 }
 function leadTable(rows) {
@@ -1027,11 +1118,30 @@ function leadTable(rows) {
     <thead><tr><th>Score</th><th>Seller</th><th>Rental</th><th>Enquiry</th><th>Address</th><th>Suburb</th><th>Owner</th><th>Class</th><th>Props</th><th>Rentals</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
-function buyerTable(rows) {
-  if (!rows.length) return `<div class="empty">No buyer leads yet. Upload a LockedOn enquiry export — contacts that don't match a property owner appear here.</div>`;
+function warmTable(rows) {
+  if (!rows.length) return `<div class="empty">No warm sellers yet. A warm seller is a LockedOn enquirer who <b>also owns a current Sunshine Coast property</b> in your database. Load the RP Data export(s) for the suburbs where your enquirers own, then drop your LockedOn enquiry CSV.</div>`;
+  const body = rows.map(p => `
+    <tr class="s${p.combinedScore}">
+      <td class="score">${p.combinedScore}</td>
+      <td>${enquiryCell(p)}</td>
+      <td>${esc(p.enquiryContact)}</td>
+      <td>${esc(p.owner1)}</td>
+      <td>${esc(p.fullAddress)}</td>
+      <td>${esc(p.suburbName)}</td>
+      <td style="text-align:center;">${p.ownerPropertyCount}</td>
+      <td>${gradeSpan(p.sellerLead)}</td>
+      <td>${esc(p.ownerType)}</td>
+      <td>${esc(p.recommendedAction)}</td>
+    </tr>`).join("");
+  return `<div class="table-scroll"><table>
+    <thead><tr><th>Score</th><th>Warm</th><th>Enquirer (LockedOn)</th><th>Owner (database)</th><th>SC Property Owned</th><th>Suburb</th><th>Props</th><th>Seller</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+}
+function holdingTable(rows) {
+  if (!rows.length) return `<div class="empty">Nothing in holding. Enquirers who aren't yet confirmed as current Sunshine Coast owners land here — ready to cross-check against RP Data when you get a chance.</div>`;
   const body = rows.map(c => `
-    <tr class="${c.recentEnquiry ? "s8" : ""}">
-      <td>${c.recentEnquiry ? '<span class="grade HIGH">●</span> ' : ""}${esc(c.name)}</td>
+    <tr>
+      <td>${esc(c.name)}</td>
       <td>${esc(c.email)}</td>
       <td>${esc(c.phone)}</td>
       <td>${esc(c.enquiryDateStr)}</td>
@@ -1039,8 +1149,9 @@ function buyerTable(rows) {
       <td>${esc(c.contactType)}</td>
       <td>${esc(c.source)}</td>
     </tr>`).join("");
-  return `<div class="table-scroll"><table>
-    <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Enquiry Date</th><th>Interest / Property</th><th>Type</th><th>Source</th></tr></thead>
+  return `<div class="filterbar"><span class="muted">These enquirers are not yet matched to a current SC property. Pull their RP Data, drop the suburb export in, and any who own on the Coast will move to Warm Sellers automatically.</span></div>
+    <div class="table-scroll"><table>
+    <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Enquiry Date</th><th>Property Enquired On</th><th>Enquiry Type</th><th>Source File</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 
@@ -1137,9 +1248,15 @@ const EXPORT_COLS = [
   ["saleEvents","Sale Events"],["landUse","Land Use"],["developmentZone","Development Zone"],
   ["parcelDetails","Parcel Details"],["openInRpData","Open in RPData"]
 ];
-const BUYER_COLS = [
+const WARM_COLS = [
+  ["combinedScore","Score"],["enquiryContact","Enquirer (LockedOn)"],["enquiryDateStr","Enquiry Date"],
+  ["owner1","Owner (database)"],["fullAddress","SC Property Owned"],["suburbName","Suburb"],
+  ["postalAddress","Postal Address"],["ownerPropertyCount","Properties Owned"],
+  ["sellerLead","Seller Lead"],["ownerType","Owner Type"],["recommendedAction","Recommended Action"]
+];
+const HOLDING_COLS = [
   ["name","Name"],["email","Email"],["phone","Phone"],["enquiryDateStr","Enquiry Date"],
-  ["recentEnquiry","Recent"],["interest","Interest / Property"],["contactType","Type"],["source","Source"]
+  ["interest","Property Enquired On"],["contactType","Enquiry Type"],["source","Source File"]
 ];
 // Portfolio rows have a variable number of properties, so columns are built
 // dynamically: one "SC Property N" column per holding (widest owner sets N),
@@ -1183,7 +1300,6 @@ function rowsToCSV(rows, cols) {
 
 /* ── data subsets ── */
 function subsetSeller()   { return DATASET.filter(p => p.sellerLead !== "NO").sort((a, b) => b.combinedScore - a.combinedScore); }
-function subsetRentals()  { return DATASET.filter(p => p.ownerType === "Rented").sort((a, b) => b.combinedScore - a.combinedScore); }
 function subsetHigh()     { return DATASET.filter(p => p.sellerLead === "HIGH" || p.rentalLead === "HIGH").sort((a, b) => b.combinedScore - a.combinedScore); }
 function subsetAll()      { return DATASET.slice().sort((a, b) => b.combinedScore - a.combinedScore); }
 function subsetFiltered() { return DATASET.filter(p => p.nonSaleable); }
@@ -1247,7 +1363,8 @@ function exportPortfolios() {
 }
 const exportHigh       = () => exportCSV(subsetHigh(), EXPORT_COLS, "high-priority leads", "HighPriority");
 const exportAll        = () => exportCSV(subsetAll(), EXPORT_COLS, "parcels", "AllProperties");
-const exportBuyers     = () => exportCSV(BUYERS, BUYER_COLS, "buyer leads", "BuyerLeads");
+const exportWarm       = () => exportCSV(WARM, WARM_COLS, "warm sellers", "WarmSellers");
+const exportHolding    = () => exportCSV(HOLDING, HOLDING_COLS, "holding enquirers", "Holding_PendingRPData");
 
 /* ── minimal in-browser .xlsx writer (zip of XML, store method) ── */
 const CRC32_TABLE = (() => {
@@ -1392,29 +1509,30 @@ function buildSummarySheet() {
     ["Owners with 3+ properties", owners(3)],
     ["Owners with 4+ (portfolio investors)", owners(4)],
     ["Confirmed rentals", saleable.filter(p => p.ownerType === "Rented").length],
-    ["Owners matched to a LockedOn enquiry", saleable.filter(p => p.knownToOffice).length],
-    ["Owners with a RECENT enquiry (warm)", saleable.filter(p => p.recentEnquiry).length],
-    ["Buyer leads (unmatched enquirers)", BUYERS.length],
+    ["Warm sellers (enquired + own current SC property)", WARM.length],
+    ["  of which enquired recently", WARM.filter(p => p.recentEnquiry).length],
+    ["Holding — enquirers pending RP Data lookup", HOLDING.length],
     ["Generated", new Date().toLocaleString("en-AU")]
   ];
   return { name: "Summary", header: ["Metric", "Value"], rows };
 }
 function exportWorkbook() {
-  if (!DATASET.length && !BUYERS.length) { toast("Nothing to export."); return; }
+  if (!DATASET.length) { toast("Nothing to export."); return; }
   const sheets = [
     buildSummarySheet(),
+    sheetFrom("Warm Sellers", WARM, WARM_COLS),
     sheetFrom("High Priority", subsetHigh(), EXPORT_COLS),
     sheetFrom("Seller Leads", subsetSeller(), EXPORT_COLS),
     (() => { const rm = rentalsMatrix(subsetRentalLandlords()); return { name: "Rentals", header: rm.header, rows: rm.data.map(r => r.map(cellValue)) }; })(),
     (() => { const pm = portfolioMatrix(subsetPortfolios()); return { name: "Portfolios", header: pm.header, rows: pm.data.map(r => r.map(cellValue)) }; })(),
-    sheetFrom("Buyer Leads", BUYERS, BUYER_COLS),
     sheetFrom("All Properties", subsetAll(), EXPORT_COLS),
+    sheetFrom("Holding Pending RP Data", HOLDING, HOLDING_COLS),
     sheetFrom("Filtered Out", subsetFiltered(), FILTERED_COLS)
   ];
   const bytes = buildXlsx(sheets);
   downloadBlob(bytes, `BPI_Master_Dashboard_${stamp()}.xlsx`,
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  toast("Exported complete workbook (8 tabs) to Excel.");
+  toast("Exported complete workbook (9 tabs) to Excel.");
 }
 
 /* ───────────────────────── UI wiring ───────────────────────── */
@@ -1450,7 +1568,8 @@ document.getElementById("exportSellerBtn").addEventListener("click", exportSelle
 document.getElementById("exportRentalsBtn").addEventListener("click", exportRentals);
 document.getElementById("exportPortfoliosBtn").addEventListener("click", exportPortfolios);
 document.getElementById("exportHighBtn").addEventListener("click", exportHigh);
-document.getElementById("exportBuyersBtn").addEventListener("click", exportBuyers);
+document.getElementById("exportWarmBtn").addEventListener("click", exportWarm);
+document.getElementById("exportHoldingBtn").addEventListener("click", exportHolding);
 document.getElementById("exportAllBtn").addEventListener("click", exportAll);
 
 document.querySelectorAll(".tab").forEach(tab => {
@@ -1464,22 +1583,21 @@ document.querySelectorAll(".tab").forEach(tab => {
   });
 });
 
-/* Global search — address / owner / contact name */
+/* Global search — address / owner / enquirer name */
 function runSearch(q) {
   const panel = document.getElementById("panel-search");
   const matchP = DATASET
-    .filter(p => (p.fullAddress + " " + p.owner1 + " " + (p.owner2 || "") + " " + p.suburb).toLowerCase().includes(q))
+    .filter(p => (p.fullAddress + " " + p.owner1 + " " + (p.owner2 || "") + " " + p.suburb + " " + (p.enquiryContact || "")).toLowerCase().includes(q))
     .sort((a, b) => b.combinedScore - a.combinedScore);
-  const matchB = BUYERS
-    .filter(c => (c.name + " " + (c.email || "") + " " + (c.phone || "") + " " + (c.interest || "")).toLowerCase().includes(q));
+  const warm = matchP.filter(p => p.warmSeller);
   document.getElementById("searchHint").textContent =
-    `${matchP.length} propert${matchP.length === 1 ? "y" : "ies"}/owner${matchP.length === 1 ? "" : "s"} · ${matchB.length} contact${matchB.length === 1 ? "" : "s"}`;
+    `${matchP.length} propert${matchP.length === 1 ? "y" : "ies"}/owner${matchP.length === 1 ? "" : "s"}` +
+    (warm.length ? ` · ${warm.length} warm seller${warm.length === 1 ? "" : "s"}` : "");
   panel.innerHTML =
+    (warm.length ? `<h3 class="section">WARM SELLERS (${warm.length})</h3>` + warmTable(warm) : "") +
     `<h3 class="section">PROPERTIES & OWNERS (${matchP.length})</h3>` +
     leadTable(matchP.slice(0, 500)) +
-    (matchP.length > 500 ? `<p class="muted">Showing first 500 of ${matchP.length}.</p>` : "") +
-    `<h3 class="section">BUYER LEADS / CONTACTS (${matchB.length})</h3>` +
-    buyerTable(matchB.slice(0, 500));
+    (matchP.length > 500 ? `<p class="muted">Showing first 500 of ${matchP.length}.</p>` : "");
 }
 function showSearch(q) {
   document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));

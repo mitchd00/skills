@@ -44,47 +44,58 @@ DAILY USE
 
   - Drop the same file twice? No problem — it de-duplicates.
 
-  - Tabs: Summary, High Priority, Portfolios, Rentals,
-    Buyer Leads, All Properties, Filtered Out.
+  - Tabs: Summary, High Priority, Warm Sellers,
+    Holding (Pending RP Data), Portfolios, Rentals,
+    All Properties, Filtered Out.
 
 ================================================================
-LOCKEDON ENQUIRY DATA
+ENQUIRY DATA  (LockedOn  OR  RP Data enquiries)
 ================================================================
 
-  - Drop a LockedOn export (e.g. people who enquired recently)
-    onto the SECOND drop zone, or click "Pick LockedOn CSV...".
+  - Drop an enquiry export onto the SECOND drop zone (or click
+    "Pick LockedOn CSV..."). It accepts BOTH LockedOn exports and
+    RP Data enquiry exports — columns are auto-detected.
 
-  - The app auto-detects the name / email / phone / date /
-    property columns (LockedOn exports vary).
+  - WARM SELLER rule: an enquirer who is in your database AND
+    owns a CURRENT Sunshine Coast property is flagged a warm
+    seller — highlighted with a gold star and given +2 points.
+    They appear in the Warm Sellers tab and are starred wherever
+    they show up. (Recency window tunable in Scoring settings.)
 
-  - A contact whose NAME matches a property OWNER becomes a
-    WARM SELLER signal — that owner's Combined Score is boosted
-    and the row is tagged with the enquiry date. (Window is
-    tunable in Scoring settings; default 6 months.)
+  - HOLDING (Pending RP Data): an enquirer who is NOT yet
+    confirmed as a current SC owner lands in the Holding tab.
+    These are people to look up: pull their RP Data, drop the
+    suburb export in, and any who own on the Coast move to Warm
+    Sellers automatically.
 
-  - A contact who does NOT match an owner becomes a BUYER LEAD,
-    listed in the Buyer Leads tab with their contact details.
+  - COLUMN MAPPING APPROVAL: if the app isn't fully sure which
+    columns are which (e.g. an RP Data export with "user name"),
+    it shows a mapping dialog before importing. Anything matched
+    loosely is flagged "(check)" — confirm or correct the dropdowns,
+    then click "Import with these columns". Clean LockedOn exports
+    import straight through with no prompt.
 
 ================================================================
 SEARCH
 ================================================================
 
   - The search box at the top of the dashboard finds any
-    address, owner, or contact name. Type 2+ characters; results
-    show matching properties/owners AND matching contacts.
+    address, owner, or enquirer name. Type 2+ characters; warm
+    sellers among the matches are shown first.
     Clear it (or click any tab) to return to the dashboard.
 
 ================================================================
 EXPORTS
 ================================================================
 
-  - "Complete workbook (Excel, all tabs)" — one .xlsx with eight
-    tabs: Summary, High Priority, Seller Leads, Rentals,
-    Portfolios, Buyer Leads, All Properties, Filtered Out.
-    Bold headers, frozen top row, auto-filter on every column.
+  - "Complete workbook (Excel, all tabs)" — one .xlsx with nine
+    tabs: Summary, Warm Sellers, High Priority, Seller Leads,
+    Rentals, Portfolios, All Properties, Holding (Pending RP Data),
+    Filtered Out. Bold headers, frozen top row, auto-filter on
+    every column.
 
-  - Targeted CSV buttons: Seller Leads, Rentals, Portfolios,
-    High Priority, Buyer Leads, All Properties.
+  - Targeted CSV buttons: Warm Sellers, Holding (Pending RP Data),
+    Seller Leads, Rentals, Portfolios, High Priority, All Properties.
 
   - Portfolios tab/export lists each of an owner's Sunshine
     Coast holdings in its OWN column (SC Property 1, SC Property
