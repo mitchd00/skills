@@ -1678,7 +1678,7 @@ document.getElementById("panel-review").addEventListener("click", e => {
   if (btn.dataset.review === "approve") { DECISIONS.approved.add(key); DECISIONS.rejected.delete(key); }
   else { DECISIONS.rejected.add(key); DECISIONS.approved.delete(key); }
   saveDecisions();
-  refresh();
+  refresh().then(autosave);
   toast(btn.dataset.review === "approve" ? "Approved — flagged as warm seller." : "Rejected — match dismissed.");
 });
 
@@ -1737,11 +1737,13 @@ document.getElementById("applyCfgBtn").addEventListener("click", async () => {
   CONFIG.non_saleable_land_uses = document.getElementById("cfgLandUse").value.split("\n").map(s => s.trim()).filter(Boolean);
   saveConfig(CONFIG);
   await refresh();
+  await autosave();
   toast("Settings applied — scores recomputed.");
 });
 document.getElementById("resetCfgBtn").addEventListener("click", async () => {
   CONFIG = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
   saveConfig(CONFIG); fillSettings(); await refresh();
+  await autosave();
   toast("Settings reset to defaults.");
 });
 
@@ -1772,7 +1774,12 @@ async function buildPayload() {
   const sales = await getAllSales();
   const contacts = await getAllContacts();
   const runs = await getRuns();
-  return JSON.stringify({ app: "bpi", version: 2, exportedAt: new Date().toISOString(), sales, contacts, runs });
+  return JSON.stringify({
+    app: "bpi", version: 3, exportedAt: new Date().toISOString(),
+    sales, contacts, runs,
+    config: CONFIG,
+    decisions: { approved: [...DECISIONS.approved], rejected: [...DECISIONS.rejected] }
+  });
 }
 async function writeDBFile(handle) {
   const w = await handle.createWritable();
@@ -1782,9 +1789,24 @@ async function writeDBFile(handle) {
 async function readDBFile(handle) {
   const file = await handle.getFile();
   const text = await file.text();
-  if (!text.trim()) return { sales: [], contacts: [], runs: { count: 0, files: [] } };
+  if (!text.trim()) return { sales: [], contacts: [], runs: { count: 0, files: [] }, config: null, decisions: null };
   const data = JSON.parse(text);
-  return { sales: data.sales || [], contacts: data.contacts || [], runs: data.runs || { count: 0, files: [] } };
+  return {
+    sales: data.sales || [], contacts: data.contacts || [], runs: data.runs || { count: 0, files: [] },
+    config: data.config || null, decisions: data.decisions || null
+  };
+}
+// Apply config + match decisions loaded from the memory file (globals + local cache).
+function applyLoadedExtras(config, decisions) {
+  if (decisions) {
+    DECISIONS = { approved: new Set(decisions.approved || []), rejected: new Set(decisions.rejected || []) };
+    saveDecisions();
+  }
+  if (config) {
+    CONFIG = Object.assign({}, DEFAULT_CONFIG, config);
+    saveConfig(CONFIG);
+    if (typeof fillSettings === "function") fillSettings();
+  }
 }
 async function replaceAll(sales, contacts, runs) {
   const db = await openDB();
@@ -1871,7 +1893,8 @@ async function reconnect() {
 }
 async function loadFromHandle(h) {
   try {
-    const { sales, contacts, runs } = await readDBFile(h);
+    const { sales, contacts, runs, config, decisions } = await readDBFile(h);
+    applyLoadedExtras(config, decisions);
     await replaceAll(sales, contacts, runs);
     await refresh();
   } catch (e) {
@@ -1912,6 +1935,7 @@ function loadCopy() { document.getElementById("loadCopyInput").click(); }
 async function loadCopyFile(file) {
   try {
     const data = JSON.parse(await file.text());
+    applyLoadedExtras(data.config || null, data.decisions || null);
     await replaceAll(data.sales || [], data.contacts || [], data.runs || { count: 0, files: [] });
     await refresh();
     await autosave();

@@ -6,7 +6,10 @@ WHAT'S IN THIS FOLDER
 ================================================================
 
   bpi-hub.html        The app. Double-click to open in Edge or Chrome.
-  bpi-database.json   Your memory file. The app saves everything here.
+  bpi-database.json   Your memory file. The app saves EVERYTHING here —
+                      sales, enquiries, your scoring settings, and your
+                      Review-Matches approvals — so it all follows the
+                      OneDrive file across machines.
   README.txt          This file.
 
 Keep all three together in the one folder (e.g. on OneDrive).
