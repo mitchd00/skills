@@ -35,8 +35,8 @@ Done. From now on everything you do is saved to that file.
 DAILY USE
 ================================================================
 
-  - Drag an RP Data CSV export onto the drop zone (or click
-    "Pick CSV..."). The dashboard appears instantly.
+  - Drag an RP Data CSV export onto the top drop zone (or click
+    "Pick RP Data CSV..."). The dashboard appears instantly.
 
   - Drop more CSVs (other suburbs, owner-search exports). They
     ADD to what's already there — owners who hold property across
@@ -45,10 +45,46 @@ DAILY USE
   - Drop the same file twice? No problem — it de-duplicates.
 
   - Tabs: Summary, High Priority, Portfolios, Rentals,
-    All Properties, Filtered Out.
+    Buyer Leads, All Properties, Filtered Out.
 
-  - "Export High Priority (Excel)" opens straight in Excel.
-  - "Export All (CSV)" gives the full scored list.
+================================================================
+LOCKEDON ENQUIRY DATA
+================================================================
+
+  - Drop a LockedOn export (e.g. people who enquired recently)
+    onto the SECOND drop zone, or click "Pick LockedOn CSV...".
+
+  - The app auto-detects the name / email / phone / date /
+    property columns (LockedOn exports vary).
+
+  - A contact whose NAME matches a property OWNER becomes a
+    WARM SELLER signal — that owner's Combined Score is boosted
+    and the row is tagged with the enquiry date. (Window is
+    tunable in Scoring settings; default 6 months.)
+
+  - A contact who does NOT match an owner becomes a BUYER LEAD,
+    listed in the Buyer Leads tab with their contact details.
+
+================================================================
+SEARCH
+================================================================
+
+  - The search box at the top of the dashboard finds any
+    address, owner, or contact name. Type 2+ characters; results
+    show matching properties/owners AND matching contacts.
+    Clear it (or click any tab) to return to the dashboard.
+
+================================================================
+EXPORTS
+================================================================
+
+  - "Complete workbook (Excel, all tabs)" — one .xlsx with eight
+    tabs: Summary, High Priority, Seller Leads, Rentals,
+    Portfolios, Buyer Leads, All Properties, Filtered Out.
+    Bold headers, frozen top row, auto-filter on every column.
+
+  - Targeted CSV buttons: Seller Leads, Rentals, Portfolios,
+    High Priority, Buyer Leads, All Properties.
 
 ================================================================
 EVERY TIME YOU REOPEN IT

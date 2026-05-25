@@ -49,6 +49,8 @@
   .dropzone h2 { margin: 0 0 6px; color: var(--elite-black); font-size: 16px; letter-spacing: 1px; }
   .dropzone p { margin: 4px 0; font-size: 13px; }
   .dropzone .browse { color: var(--muted-gold); text-decoration: underline; font-weight: 600; }
+  .dropzone.lockedon { padding: 20px; margin-top: -8px; border-color: #7a6a44; background: #fffdf8; }
+  .dropzone.lockedon h2 { font-size: 14px; }
 
   .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 16px 0; }
   button {
@@ -139,12 +141,29 @@
     <input type="file" id="fileInput" multiple hidden>
   </div>
 
+  <div class="dropzone lockedon" id="lockedonZone">
+    <h2>Drop LockedOn enquiry export here</h2>
+    <p>or <span class="browse">click to browse</span></p>
+    <p class="muted">A CSV of contacts/enquiries from LockedOn. Names that match a property owner become a <b>warm seller signal</b> (boosts their score). Names that don't match become <b>Buyer Leads</b>. Auto-detects common LockedOn column names.</p>
+    <input type="file" id="lockedonInput" multiple hidden>
+  </div>
+
   <div class="toolbar">
-    <button class="primary" id="pickBtn">Pick CSV…</button>
-    <button id="exportHighBtn">Export High Priority (Excel)</button>
-    <button id="exportAllBtn">Export All (CSV)</button>
+    <button class="primary" id="pickBtn">Pick RP Data CSV…</button>
+    <button id="pickLockedonBtn">Pick LockedOn CSV…</button>
     <button class="danger" id="clearBtn">Clear database</button>
     <div class="dbstat" id="dbstat">Database empty</div>
+  </div>
+
+  <div class="toolbar" id="exportBar">
+    <span class="memchip" style="background:var(--elite-black);color:var(--warm-white);">Exports</span>
+    <button class="primary" id="exportWorkbookBtn">Complete workbook (Excel, all tabs)</button>
+    <button id="exportSellerBtn">Seller Leads (CSV)</button>
+    <button id="exportRentalsBtn">Rentals (CSV)</button>
+    <button id="exportPortfoliosBtn">Portfolios (CSV)</button>
+    <button id="exportHighBtn">High Priority (CSV)</button>
+    <button id="exportBuyersBtn">Buyer Leads (CSV)</button>
+    <button id="exportAllBtn">All Properties (CSV)</button>
   </div>
 
   <div class="toolbar" id="memBar">
@@ -166,6 +185,8 @@
         <input type="number" id="cfgLongHeld">
         <label style="margin-top:10px;">Recent-purchase years (→ Seller NO)</label>
         <input type="number" id="cfgRecent">
+        <label style="margin-top:10px;">Enquiry window (months) — LockedOn match = warm seller boost</label>
+        <input type="number" id="cfgEnquiryWindow">
       </div>
       <div>
         <label>Entity name patterns (one per line)</label>
@@ -189,11 +210,17 @@
   <div id="dashboard" style="display:none;">
     <div class="stat-grid" id="statGrid"></div>
 
+    <div class="filterbar" id="searchBar">
+      <input type="text" id="globalSearch" placeholder="🔎  Search any address, owner, or contact name…" style="width:460px;">
+      <span class="muted" id="searchHint"></span>
+    </div>
+
     <div class="tabs" id="tabs">
       <button class="tab active" data-tab="summary">Summary</button>
       <button class="tab" data-tab="high">High Priority <span class="count" id="cnt-high"></span></button>
       <button class="tab" data-tab="portfolios">Portfolios <span class="count" id="cnt-portfolios"></span></button>
       <button class="tab" data-tab="rentals">Rentals <span class="count" id="cnt-rentals"></span></button>
+      <button class="tab" data-tab="buyers">Buyer Leads <span class="count" id="cnt-buyers"></span></button>
       <button class="tab" data-tab="all">All Properties <span class="count" id="cnt-all"></span></button>
       <button class="tab" data-tab="filtered">Filtered Out <span class="count" id="cnt-filtered"></span></button>
     </div>
@@ -202,8 +229,10 @@
     <div class="panel" id="panel-high"></div>
     <div class="panel" id="panel-portfolios"></div>
     <div class="panel" id="panel-rentals"></div>
+    <div class="panel" id="panel-buyers"></div>
     <div class="panel" id="panel-all"></div>
     <div class="panel" id="panel-filtered"></div>
+    <div class="panel" id="panel-search"></div>
   </div>
 
   <div class="empty" id="emptyState">
@@ -227,6 +256,8 @@ const DEFAULT_CONFIG = {
   sc_postcodes: [4551, 4575, 4556, 4557, 4558, 4573, 4566],
   long_held_years: 15,
   recent_purchase_years: 5,
+  enquiry_window_months: 6,
+  enquiry_boost: 2,
   entity_patterns: [
     "PTY LTD","PTY. LTD","LIMITED"," LTD","TRUST","SUPER","SUPERANNUATION","SMSF",
     "NOMINEES","HOLDINGS","INVESTMENTS","PROPERTIES"," GROUP"," CO."," & CO",
@@ -403,6 +434,107 @@ function titleCase(s) {
   return String(s || "").toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
 }
 
+/* ───────────────────────── LockedOn enquiry import + name matching ───────────────────────── */
+
+// Header synonyms — LockedOn exports vary, so match loosely (case-insensitive substring).
+const LO_FIELDS = {
+  first:   ["first name", "firstname", "given name", "given"],
+  last:    ["last name", "lastname", "surname", "family name"],
+  name:    ["contact name", "full name", "name", "contact", "client", "lead name"],
+  email:   ["email", "e-mail"],
+  phone:   ["mobile", "phone", "telephone", "contact number"],
+  date:    ["enquiry date", "date of enquiry", "created", "date added", "added", "last activity", "last contact", "date"],
+  interest:["property", "address", "interest", "enquiry", "enquired about", "listing", "notes", "comment"],
+  type:    ["contact type", "type", "category", "status", "source"]
+};
+function findCol(header, synonyms) {
+  const lower = header.map(h => h.toLowerCase().trim());
+  for (const syn of synonyms) {
+    const i = lower.findIndex(h => h === syn);
+    if (i !== -1) return i;
+  }
+  for (const syn of synonyms) {
+    const i = lower.findIndex(h => h.includes(syn));
+    if (i !== -1) return i;
+  }
+  return -1;
+}
+function parseAnyDate(s) {
+  if (!s) return null;
+  const t = String(s).trim();
+  let d = parseSaleDate(t);            // handles "09 Nov 2000"
+  if (d) return d;
+  // dd/mm/yyyy or dd-mm-yyyy (Australian)
+  const m = t.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (m) {
+    let yr = Number(m[3]); if (yr < 100) yr += 2000;
+    d = new Date(yr, Number(m[2]) - 1, Number(m[1]));
+    return isNaN(d) ? null : d;
+  }
+  d = new Date(t);
+  return isNaN(d) ? null : d;
+}
+
+// Parse a LockedOn CSV into contact records. Returns {records, detected}.
+function csvToContacts(text, sourceName) {
+  const rows = parseCSV(text).filter(r => r.some(c => (c || "").trim() !== ""));
+  if (!rows.length) throw new Error("Empty file.");
+  const header = rows[0].map(h => h.trim());
+  const col = {
+    first: findCol(header, LO_FIELDS.first),
+    last:  findCol(header, LO_FIELDS.last),
+    name:  findCol(header, LO_FIELDS.name),
+    email: findCol(header, LO_FIELDS.email),
+    phone: findCol(header, LO_FIELDS.phone),
+    date:  findCol(header, LO_FIELDS.date),
+    interest: findCol(header, LO_FIELDS.interest),
+    type:  findCol(header, LO_FIELDS.type)
+  };
+  if (col.name === -1 && col.last === -1 && col.first === -1) {
+    throw new Error("Could not find a name column in this LockedOn export.");
+  }
+  const at = (r, i) => (i >= 0 && i < r.length ? (r[i] || "").trim() : "");
+  const records = [];
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    let name = at(r, col.name);
+    if (!name) name = `${at(r, col.first)} ${at(r, col.last)}`.trim();
+    if (!name) continue;
+    const dateRaw = at(r, col.date);
+    const d = parseAnyDate(dateRaw);
+    const rec = {
+      name,
+      email: at(r, col.email),
+      phone: at(r, col.phone),
+      enquiryDateMs: d ? d.getTime() : null,
+      enquiryDateStr: dateRaw,
+      interest: at(r, col.interest),
+      contactType: at(r, col.type),
+      source: sourceName,
+      tokens: Array.from(nameTokens(name))
+    };
+    rec.k = `${name.toUpperCase()}|${rec.email.toUpperCase()}|${rec.enquiryDateMs || ""}`;
+    records.push(rec);
+  }
+  const detected = Object.entries(col).filter(([, v]) => v !== -1).map(([k, v]) => `${k}→"${header[v]}"`);
+  return { records, detected };
+}
+
+// Tokenise a person name to a set of comparable alpha tokens (≥2 chars).
+function nameTokens(name) {
+  const out = new Set();
+  String(name || "").toUpperCase().replace(/[^A-Z\s,&\-]/g, " ").split(/[\s,&\-]+/).forEach(t => {
+    if (t.length >= 2 && !["MR","MRS","MS","DR","THE","AND"].includes(t)) out.add(t);
+  });
+  return out;
+}
+// Two names match if they share ≥2 significant tokens (handles "John Smith" vs "SMITH JOHN PETER").
+function namesMatch(tokensA, setB) {
+  let shared = 0;
+  for (const t of tokensA) if (setB.has(t)) shared++;
+  return shared >= 2;
+}
+
 /* ───────────────────────── Scoring logic (ported from Python) ───────────────────────── */
 
 function classifyEntity(name) {
@@ -454,8 +586,86 @@ function combine(seller, rental) {
   return SCORE_MATRIX[`${seller}|${rental}`] || [1, "Skip"];
 }
 
+/* Enquiry matching — link LockedOn contacts to owners and to buyer leads. */
+function buildOwnerIndex(parcels) {
+  const owners = new Map();          // owner name → token Set
+  for (const p of parcels) {
+    if (p.nonSaleable) continue;
+    if (["-","UNKNOWN","","NAN"].includes(p.owner1)) continue;
+    if (!owners.has(p.owner1)) owners.set(p.owner1, nameTokens(p.owner1));
+  }
+  const tokenIndex = new Map();      // token → [owner names]
+  for (const [name, toks] of owners) {
+    for (const t of toks) {
+      if (!tokenIndex.has(t)) tokenIndex.set(t, []);
+      tokenIndex.get(t).push(name);
+    }
+  }
+  return { owners, tokenIndex };
+}
+function ownersMatchingContact(contact, index) {
+  const counts = new Map();
+  for (const t of (contact.tokens || [])) {
+    const names = index.tokenIndex.get(t);
+    if (names) for (const n of names) counts.set(n, (counts.get(n) || 0) + 1);
+  }
+  const matched = [];
+  for (const [n, c] of counts) if (c >= 2) matched.push(n);   // need ≥2 shared tokens
+  return matched;
+}
+// Apply LockedOn enquiry data to parcels: tag owner matches, boost recent ones.
+function applyEnquiryData(parcels, contacts) {
+  if (!contacts || !contacts.length) return;
+  const windowMs = (CONFIG.enquiry_window_months || 6) * 30.44 * 864e5;
+  const boost = CONFIG.enquiry_boost || 2;
+  const now = Date.now();
+  const index = buildOwnerIndex(parcels);
+  const ownerEnquiry = new Map();    // owner name → most-recent matching contact
+  for (const c of contacts) {
+    for (const n of ownersMatchingContact(c, index)) {
+      const prev = ownerEnquiry.get(n);
+      if (!prev || (c.enquiryDateMs || 0) > (prev.enquiryDateMs || 0)) ownerEnquiry.set(n, c);
+    }
+  }
+  for (const p of parcels) {
+    const c = ownerEnquiry.get(p.owner1);
+    if (!c) continue;
+    p.knownToOffice = true;
+    p.enquiryContact = c.name;
+    p.enquiryDateStr = c.enquiryDateStr || "";
+    p.enquiryDateMs = c.enquiryDateMs;
+    p.recentEnquiry = c.enquiryDateMs ? (now - c.enquiryDateMs) <= windowMs : false;
+    if (p.recentEnquiry && !p.nonSaleable) {
+      const before = p.combinedScore;
+      p.combinedScore = Math.min(10, p.combinedScore + boost);
+      p.enquiryBoost = p.combinedScore - before;
+      p.recommendedAction = (p.recommendedAction || "") + " — recent enquiry on file (warm); contact directly.";
+    }
+  }
+}
+// Buyer leads = LockedOn contacts that did NOT match any owner, deduped, most-recent first.
+function computeBuyerLeads(contacts, parcels) {
+  if (!contacts || !contacts.length) return [];
+  const index = buildOwnerIndex(parcels);
+  const now = Date.now();
+  const windowMs = (CONFIG.enquiry_window_months || 6) * 30.44 * 864e5;
+  const byPerson = new Map();
+  for (const c of contacts) {
+    if (ownersMatchingContact(c, index).length) continue;   // matched an owner → not a buyer lead
+    const key = (c.name.toUpperCase() + "|" + (c.email || "").toUpperCase());
+    const prev = byPerson.get(key);
+    if (!prev || (c.enquiryDateMs || 0) > (prev.enquiryDateMs || 0)) byPerson.set(key, c);
+  }
+  const buyers = Array.from(byPerson.values()).map(c => ({
+    ...c,
+    recentEnquiry: c.enquiryDateMs ? (now - c.enquiryDateMs) <= windowMs : false
+  }));
+  buyers.sort((a, b) => (b.enquiryDateMs || 0) - (a.enquiryDateMs || 0));
+  return buyers;
+}
+
 // Full recompute across all stored sale records → array of scored current-owner parcels.
-function recompute(allSales) {
+function recompute(allSales, contacts = []) {
   const scSet = new Set(CONFIG.sc_postcodes.map(Number));
   const now = Date.now();
 
@@ -514,22 +724,54 @@ function recompute(allSales) {
     const [score, action] = combine(p.sellerLead, p.rentalLead);
     p.combinedScore = score;
     p.recommendedAction = action;
+    p.knownToOffice = false;
+    p.recentEnquiry = false;
+    p.enquiryContact = "";
+    p.enquiryDateStr = "";
   }
+  applyEnquiryData(parcels, contacts);
   return parcels;
 }
 
 /* ───────────────────────── IndexedDB (the Hub store) ───────────────────────── */
 
-const DB_NAME = "bpi_hub", STORE = "sales", META = "meta";
+const DB_NAME = "bpi_hub", STORE = "sales", META = "meta", CONTACTS = "contacts";
 function openDB() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
+    const req = indexedDB.open(DB_NAME, 2);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: "k" });
       if (!db.objectStoreNames.contains(META)) db.createObjectStore(META, { keyPath: "id" });
+      if (!db.objectStoreNames.contains(CONTACTS)) db.createObjectStore(CONTACTS, { keyPath: "k" });
     };
     req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function putContacts(records) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(CONTACTS, "readwrite");
+    const store = tx.objectStore(CONTACTS);
+    const existing = new Set();
+    let added = 0;
+    const cur = store.openKeyCursor();
+    cur.onsuccess = () => {
+      const c = cur.result;
+      if (c) { existing.add(c.key); c.continue(); }
+      else for (const rec of records) { if (!existing.has(rec.k)) added++; store.put(rec); }
+    };
+    tx.oncomplete = () => resolve({ added });
+    tx.onerror = () => reject(tx.error);
+  });
+}
+async function getAllContacts() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(CONTACTS, "readonly");
+    const req = tx.objectStore(CONTACTS).getAll();
+    req.onsuccess = () => resolve(req.result || []);
     req.onerror = () => reject(req.error);
   });
 }
@@ -568,8 +810,9 @@ async function getAllSales() {
 async function clearSales() {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction([STORE, META], "readwrite");
+    const tx = db.transaction([STORE, META, CONTACTS], "readwrite");
     tx.objectStore(STORE).clear();
+    tx.objectStore(CONTACTS).clear();
     tx.objectStore(META).delete("runs");   // keep the linked-file handle ('dbfile')
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
@@ -602,7 +845,29 @@ async function getRuns() {
 
 /* ───────────────────────── App state + rendering ───────────────────────── */
 
-let DATASET = [];   // last recompute result
+let DATASET = [];   // last recompute result (scored parcels)
+let BUYERS = [];    // last computed buyer leads
+
+async function ingestLockedOn(fileList) {
+  const files = Array.from(fileList);
+  if (!files.length) { toast("No files selected."); return; }
+  let totalNew = 0, totalRows = 0, errors = [], detectedMsg = "";
+  for (const file of files) {
+    try {
+      const text = await file.text();
+      const { records, detected } = csvToContacts(text, file.name);
+      const { added } = await putContacts(records);
+      totalNew += added; totalRows += records.length;
+      detectedMsg = detected.join(", ");
+    } catch (e) {
+      errors.push(`${file.name}: ${e.message}`);
+    }
+  }
+  await refresh();
+  await autosave();
+  if (errors.length) toast("LockedOn import issues:\n" + errors.join("\n"));
+  else toast(`Loaded ${totalRows} LockedOn contacts (${totalNew} new). Detected: ${detectedMsg}`);
+}
 
 async function ingestFiles(fileList) {
   // Accept whatever the user picks/drops — the parser validates it's an RP Data
@@ -630,22 +895,28 @@ async function ingestFiles(fileList) {
 
 async function refresh() {
   const allSales = await getAllSales();
+  const contacts = await getAllContacts();
   const runs = await getRuns();
-  if (!allSales.length) {
-    DATASET = [];
+  if (!allSales.length && !contacts.length) {
+    DATASET = []; BUYERS = [];
     document.getElementById("dashboard").style.display = "none";
     document.getElementById("emptyState").style.display = "block";
     document.getElementById("dbstat").textContent = "Database empty";
     return;
   }
-  DATASET = recompute(allSales);
+  DATASET = recompute(allSales, contacts);
+  BUYERS = computeBuyerLeads(contacts, DATASET);
   document.getElementById("emptyState").style.display = "none";
   document.getElementById("dashboard").style.display = "block";
 
   const parcels = DATASET.length;
   const owners = new Set(DATASET.filter(p => !["-","UNKNOWN","","NAN"].includes(p.owner1)).map(p => p.owner1)).size;
+  const enquiryMatches = DATASET.filter(p => p.knownToOffice).length;
+  const contactBit = contacts.length
+    ? ` · <b>${contacts.length}</b> LockedOn contacts (<b>${enquiryMatches}</b> owner matches)`
+    : "";
   document.getElementById("dbstat").innerHTML =
-    `<b>${allSales.length}</b> sales · <b>${parcels}</b> parcels · <b>${owners}</b> owners · <b>${runs.count}</b> ingests`;
+    `<b>${allSales.length}</b> sales · <b>${parcels}</b> parcels · <b>${owners}</b> owners · <b>${runs.count}</b> ingests${contactBit}`;
 
   renderDashboard();
 }
@@ -677,19 +948,21 @@ function renderDashboard() {
   const owners2 = new Set(saleable.filter(p => p.ownerPropertyCount >= 2).map(p => p.owner1)).size;
   const owners4 = new Set(saleable.filter(p => p.ownerPropertyCount >= 4).map(p => p.owner1)).size;
   const confirmedRentals = saleable.filter(p => p.ownerType === "Rented").length;
+  const warmOwners = saleable.filter(p => p.recentEnquiry).length;
 
   document.getElementById("statGrid").innerHTML = [
     card(DATASET.length, "Total parcels"),
     card(high.length, "High-priority leads"),
     card(confirmedRentals, "Confirmed rentals"),
     card(owners2, "Multi-property owners"),
-    card(owners4, "Portfolio investors (4+)"),
-    card(filtered.length, "Filtered out"),
+    card(warmOwners, "Warm (recent enquiry)"),
+    card(BUYERS.length, "Buyer leads"),
   ].join("");
 
   setCount("high", high.length);
   setCount("portfolios", portfolios.length);
   setCount("rentals", rentals.length);
+  setCount("buyers", BUYERS.length);
   setCount("all", DATASET.length);
   setCount("filtered", filtered.length);
 
@@ -709,6 +982,7 @@ function renderDashboard() {
   document.getElementById("panel-rentals").innerHTML = leadTable(rentals);
   document.getElementById("panel-filtered").innerHTML = filteredTable(filtered);
   document.getElementById("panel-portfolios").innerHTML = portfolioTable(portfolios);
+  document.getElementById("panel-buyers").innerHTML = buyerTable(BUYERS);
   renderAllPanel(DATASET);
 }
 
@@ -720,6 +994,11 @@ function distTable(title, rows) {
     `</tbody></table>`;
 }
 
+function enquiryCell(p) {
+  if (p.recentEnquiry) return `<span class="grade HIGH" title="${esc(p.enquiryContact)}">● ${esc(p.enquiryDateStr || "recent")}</span>`;
+  if (p.knownToOffice) return `<span class="muted" title="${esc(p.enquiryContact)}">on file</span>`;
+  return "";
+}
 function leadTable(rows) {
   if (!rows.length) return `<div class="empty">No matching properties.</div>`;
   const body = rows.map(p => `
@@ -727,6 +1006,7 @@ function leadTable(rows) {
       <td class="score">${p.combinedScore}</td>
       <td>${gradeSpan(p.sellerLead)}</td>
       <td>${gradeSpan(p.rentalLead)}</td>
+      <td>${enquiryCell(p)}</td>
       <td>${esc(p.fullAddress)}</td>
       <td>${esc(p.owner1)}</td>
       <td>${esc(p.ownerClass)}</td>
@@ -736,7 +1016,23 @@ function leadTable(rows) {
       <td>${esc(p.recommendedAction)}</td>
     </tr>`).join("");
   return `<div class="table-scroll"><table>
-    <thead><tr><th>Score</th><th>Seller</th><th>Rental</th><th>Address</th><th>Owner</th><th>Class</th><th>Props</th><th>Rentals</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
+    <thead><tr><th>Score</th><th>Seller</th><th>Rental</th><th>Enquiry</th><th>Address</th><th>Owner</th><th>Class</th><th>Props</th><th>Rentals</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+}
+function buyerTable(rows) {
+  if (!rows.length) return `<div class="empty">No buyer leads yet. Upload a LockedOn enquiry export — contacts that don't match a property owner appear here.</div>`;
+  const body = rows.map(c => `
+    <tr class="${c.recentEnquiry ? "s8" : ""}">
+      <td>${c.recentEnquiry ? '<span class="grade HIGH">●</span> ' : ""}${esc(c.name)}</td>
+      <td>${esc(c.email)}</td>
+      <td>${esc(c.phone)}</td>
+      <td>${esc(c.enquiryDateStr)}</td>
+      <td>${esc(c.interest)}</td>
+      <td>${esc(c.contactType)}</td>
+      <td>${esc(c.source)}</td>
+    </tr>`).join("");
+  return `<div class="table-scroll"><table>
+    <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Enquiry Date</th><th>Interest / Property</th><th>Type</th><th>Source</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 
@@ -809,12 +1105,16 @@ function downloadBlob(content, filename, mime) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 function csvCell(v) {
+  if (v === true) v = "Y"; else if (v === false) v = "N";
   const s = String(v == null ? "" : v);
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
+
 const EXPORT_COLS = [
   ["combinedScore","Combined Lead Score"],["sellerLead","Seller Lead"],["rentalLead","Rental Lead"],
-  ["recommendedAction","Recommended Action"],["fullAddress","Address"],["propertyType","Property Type"],
+  ["knownToOffice","Known to Office"],["recentEnquiry","Recent Enquiry"],["enquiryContact","Enquiry Contact"],
+  ["enquiryDateStr","Enquiry Date"],["recommendedAction","Recommended Action"],
+  ["fullAddress","Address"],["propertyType","Property Type"],
   ["bed","Bed"],["bath","Bath"],["car","Car"],["landSize","Land Size m2"],["yearBuilt","Year Built"],
   ["owner1","Owner 1"],["ownerClass","Owner Class"],["ownerType","Owner Type"],["jointOwner","Joint Owner"],
   ["owner2","Owner 2"],["ownerPropertyCount","Owner Property Count"],["ownerRentalCount","Owner Rental Count"],
@@ -823,31 +1123,228 @@ const EXPORT_COLS = [
   ["saleEvents","Sale Events"],["landUse","Land Use"],["developmentZone","Development Zone"],
   ["parcelDetails","Parcel Details"],["openInRpData","Open in RPData"]
 ];
-function rowsToCSV(rows) {
-  const head = EXPORT_COLS.map(c => c[1]).join(",");
-  const body = rows.map(p => EXPORT_COLS.map(c => csvCell(p[c[0]])).join(",")).join("\n");
+const BUYER_COLS = [
+  ["name","Name"],["email","Email"],["phone","Phone"],["enquiryDateStr","Enquiry Date"],
+  ["recentEnquiry","Recent"],["interest","Interest / Property"],["contactType","Type"],["source","Source"]
+];
+const PORTFOLIO_COLS = [
+  ["owner1","Owner"],["ownerClass","Class"],["ownerPropertyCount","Properties"],
+  ["ownerRentalCount","Rentals"],["profile","Profile"],["ownerProperties","Addresses"]
+];
+const FILTERED_COLS = [
+  ["fullAddress","Address"],["propertyType","Type"],["owner1","Owner"],["landUse","Land Use"]
+];
+
+function rowsToCSV(rows, cols) {
+  const head = cols.map(c => c[1]).join(",");
+  const body = rows.map(p => cols.map(c => csvCell(p[c[0]])).join(",")).join("\n");
   return head + "\n" + body;
 }
-function rowsToExcelHTML(rows, title) {
-  const head = EXPORT_COLS.map(c => `<th>${esc(c[1])}</th>`).join("");
-  const body = rows.map(p => "<tr>" + EXPORT_COLS.map(c => `<td>${esc(p[c[0]])}</td>`).join("") + "</tr>").join("");
-  return `<html><head><meta charset="UTF-8"></head><body><h3>${esc(title)}</h3>
-    <table border="1"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></body></html>`;
+
+/* ── data subsets ── */
+function subsetSeller()   { return DATASET.filter(p => p.sellerLead !== "NO").sort((a, b) => b.combinedScore - a.combinedScore); }
+function subsetRentals()  { return DATASET.filter(p => p.ownerType === "Rented").sort((a, b) => b.combinedScore - a.combinedScore); }
+function subsetHigh()     { return DATASET.filter(p => p.sellerLead === "HIGH" || p.rentalLead === "HIGH").sort((a, b) => b.combinedScore - a.combinedScore); }
+function subsetAll()      { return DATASET.slice().sort((a, b) => b.combinedScore - a.combinedScore); }
+function subsetFiltered() { return DATASET.filter(p => p.nonSaleable); }
+function portfolioProfile(p) {
+  if (p.ownerPropertyCount >= 4 && p.ownerRentalCount >= 2) return "Portfolio investor with rentals — top priority";
+  if (p.ownerPropertyCount >= 4) return "Portfolio investor — high priority";
+  if (p.ownerRentalCount >= 2) return "Multi-property landlord — PM target";
+  if (p.ownerPropertyCount >= 3) return "Active portfolio holder";
+  if (p.ownerRentalCount >= 1) return "Investor with at least one rental";
+  return "Multi-property owner-occupier";
+}
+function subsetPortfolios() {
+  const seen = new Set(), out = [];
+  for (const p of DATASET.filter(x => !x.nonSaleable).sort((a, b) => b.ownerPropertyCount - a.ownerPropertyCount)) {
+    if (p.ownerPropertyCount >= 2 && !seen.has(p.owner1)) {
+      seen.add(p.owner1);
+      out.push({ ...p, profile: portfolioProfile(p) });
+    }
+  }
+  return out;
 }
 
-function exportHigh() {
-  if (!DATASET.length) { toast("Nothing to export."); return; }
-  const high = DATASET.filter(p => p.sellerLead === "HIGH" || p.rentalLead === "HIGH")
-                      .sort((a, b) => b.combinedScore - a.combinedScore);
-  downloadBlob(rowsToExcelHTML(high, "BPI High Priority"),
-    `BPI_HighPriority_V1_${stamp()}.xls`, "application/vnd.ms-excel");
-  toast(`Exported ${high.length} high-priority leads to Excel.`);
+/* ── per-list CSV exports ── */
+function exportCSV(rows, cols, label, fileLabel) {
+  if (!rows.length) { toast(`No ${label} to export.`); return; }
+  downloadBlob(rowsToCSV(rows, cols), `BPI_${fileLabel}_${stamp()}.csv`, "text/csv;charset=utf-8");
+  toast(`Exported ${rows.length} ${label} to CSV.`);
 }
-function exportAll() {
-  if (!DATASET.length) { toast("Nothing to export."); return; }
-  const rows = DATASET.slice().sort((a, b) => b.combinedScore - a.combinedScore);
-  downloadBlob(rowsToCSV(rows), `BPI_AllProperties_V1_${stamp()}.csv`, "text/csv;charset=utf-8");
-  toast(`Exported ${rows.length} parcels to CSV.`);
+const exportSeller     = () => exportCSV(subsetSeller(), EXPORT_COLS, "seller leads", "SellerLeads");
+const exportRentals    = () => exportCSV(subsetRentals(), EXPORT_COLS, "rentals", "Rentals");
+const exportPortfolios = () => exportCSV(subsetPortfolios(), PORTFOLIO_COLS, "portfolios", "Portfolios");
+const exportHigh       = () => exportCSV(subsetHigh(), EXPORT_COLS, "high-priority leads", "HighPriority");
+const exportAll        = () => exportCSV(subsetAll(), EXPORT_COLS, "parcels", "AllProperties");
+const exportBuyers     = () => exportCSV(BUYERS, BUYER_COLS, "buyer leads", "BuyerLeads");
+
+/* ── minimal in-browser .xlsx writer (zip of XML, store method) ── */
+const CRC32_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[n] = c >>> 0; }
+  return t;
+})();
+function crc32(u8) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < u8.length; i++) c = CRC32_TABLE[(c ^ u8[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function zipStore(files) {
+  const enc = new TextEncoder();
+  const parts = [], central = [];
+  let offset = 0;
+  for (const f of files) {
+    const nameBytes = enc.encode(f.name);
+    const crc = crc32(f.data), size = f.data.length;
+    const lh = new Uint8Array(30 + nameBytes.length);
+    const dv = new DataView(lh.buffer);
+    dv.setUint32(0, 0x04034b50, true); dv.setUint16(4, 20, true); dv.setUint16(8, 0, true);
+    dv.setUint32(14, crc, true); dv.setUint32(18, size, true); dv.setUint32(22, size, true);
+    dv.setUint16(26, nameBytes.length, true);
+    lh.set(nameBytes, 30);
+    parts.push(lh, f.data);
+    const ch = new Uint8Array(46 + nameBytes.length);
+    const cv = new DataView(ch.buffer);
+    cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+    cv.setUint32(16, crc, true); cv.setUint32(20, size, true); cv.setUint32(24, size, true);
+    cv.setUint16(28, nameBytes.length, true); cv.setUint32(42, offset, true);
+    ch.set(nameBytes, 46);
+    central.push(ch);
+    offset += lh.length + f.data.length;
+  }
+  const centralSize = central.reduce((s, c) => s + c.length, 0);
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, files.length, true); ev.setUint16(10, files.length, true);
+  ev.setUint32(12, centralSize, true); ev.setUint32(16, offset, true);
+  const all = parts.concat(central, [eocd]);
+  const total = all.reduce((s, c) => s + c.length, 0);
+  const out = new Uint8Array(total);
+  let pos = 0;
+  for (const c of all) { out.set(c, pos); pos += c.length; }
+  return out;
+}
+function xmlEsc(s) { return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function colLetter(n) { let s = ""; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
+function cellXml(ref, value, isHeader) {
+  const s = isHeader ? ' s="1"' : '';
+  if (typeof value === "number" && isFinite(value)) return `<c r="${ref}"${s}><v>${value}</v></c>`;
+  const text = xmlEsc(value == null ? "" : String(value));
+  return `<c r="${ref}" t="inlineStr"${s}><is><t xml:space="preserve">${text}</t></is></c>`;
+}
+function sheetXml(sheet) {
+  const allRows = [sheet.header, ...sheet.rows];
+  const dim = `A1:${colLetter(sheet.header.length)}${allRows.length}`;
+  let body = "";
+  allRows.forEach((row, ri) => {
+    const r = ri + 1;
+    body += `<row r="${r}">` + row.map((v, ci) => cellXml(`${colLetter(ci + 1)}${r}`, v, ri === 0)).join("") + `</row>`;
+  });
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<dimension ref="${dim}"/>
+<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+<sheetFormatPr defaultRowHeight="15"/>
+<sheetData>${body}</sheetData>
+<autoFilter ref="${dim}"/>
+</worksheet>`;
+}
+function sanitiseSheetName(name, i) {
+  let n = String(name).replace(/[\[\]:*?\/\\]/g, " ").trim().slice(0, 31);
+  return n || `Sheet${i + 1}`;
+}
+function buildXlsx(sheets) {
+  const enc = new TextEncoder();
+  const files = [];
+  const add = (name, str) => files.push({ name, data: enc.encode(str) });
+  const se = sheets.map((s, i) => ({ ...s, file: `sheet${i + 1}.xml`, rid: `rId${i + 1}`, sheetId: i + 1, safeName: sanitiseSheetName(s.name, i) }));
+  const stylesRid = `rId${sheets.length + 1}`;
+
+  add("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+${se.map(s => `<Override PartName="/xl/worksheets/${s.file}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}
+</Types>`);
+
+  add("_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`);
+
+  add("xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets>${se.map(s => `<sheet name="${xmlEsc(s.safeName)}" sheetId="${s.sheetId}" r:id="${s.rid}"/>`).join("")}</sheets>
+</workbook>`);
+
+  add("xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+${se.map(s => `<Relationship Id="${s.rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/${s.file}"/>`).join("")}
+<Relationship Id="${stylesRid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`);
+
+  add("xl/styles.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="2"><font><sz val="11"/><name val="Arial"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Arial"/></font></fonts>
+<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0A0A0A"/><bgColor indexed="64"/></patternFill></fill></fills>
+<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`);
+
+  se.forEach(s => add(`xl/worksheets/${s.file}`, sheetXml(s)));
+  return zipStore(files);
+}
+
+function cellValue(v) { if (v === true) return "Y"; if (v === false) return "N"; return v == null ? "" : v; }
+function sheetFrom(name, rows, cols) {
+  return { name, header: cols.map(c => c[1]), rows: rows.map(p => cols.map(c => cellValue(p[c[0]]))) };
+}
+function buildSummarySheet() {
+  const saleable = DATASET.filter(p => !p.nonSaleable);
+  const g = (arr, grade, key) => arr.filter(p => p[key] === grade).length;
+  const owners = n => new Set(saleable.filter(p => p.ownerPropertyCount >= n).map(p => p.owner1)).size;
+  const rows = [
+    ["Total parcels", DATASET.length],
+    ["Saleable parcels", saleable.length],
+    ["Non-saleable (filtered)", DATASET.length - saleable.length],
+    ["Seller Lead: HIGH", g(saleable, "HIGH", "sellerLead")],
+    ["Seller Lead: MEDIUM", g(saleable, "MEDIUM", "sellerLead")],
+    ["Seller Lead: LOW", g(saleable, "LOW", "sellerLead")],
+    ["Rental Lead: HIGH", g(saleable, "HIGH", "rentalLead")],
+    ["Rental Lead: MEDIUM", g(saleable, "MEDIUM", "rentalLead")],
+    ["Owners with 2+ properties", owners(2)],
+    ["Owners with 3+ properties", owners(3)],
+    ["Owners with 4+ (portfolio investors)", owners(4)],
+    ["Confirmed rentals", saleable.filter(p => p.ownerType === "Rented").length],
+    ["Owners matched to a LockedOn enquiry", saleable.filter(p => p.knownToOffice).length],
+    ["Owners with a RECENT enquiry (warm)", saleable.filter(p => p.recentEnquiry).length],
+    ["Buyer leads (unmatched enquirers)", BUYERS.length],
+    ["Generated", new Date().toLocaleString("en-AU")]
+  ];
+  return { name: "Summary", header: ["Metric", "Value"], rows };
+}
+function exportWorkbook() {
+  if (!DATASET.length && !BUYERS.length) { toast("Nothing to export."); return; }
+  const sheets = [
+    buildSummarySheet(),
+    sheetFrom("High Priority", subsetHigh(), EXPORT_COLS),
+    sheetFrom("Seller Leads", subsetSeller(), EXPORT_COLS),
+    sheetFrom("Rentals", subsetRentals(), EXPORT_COLS),
+    sheetFrom("Portfolios", subsetPortfolios(), PORTFOLIO_COLS),
+    sheetFrom("Buyer Leads", BUYERS, BUYER_COLS),
+    sheetFrom("All Properties", subsetAll(), EXPORT_COLS),
+    sheetFrom("Filtered Out", subsetFiltered(), FILTERED_COLS)
+  ];
+  const bytes = buildXlsx(sheets);
+  downloadBlob(bytes, `BPI_Master_Dashboard_${stamp()}.xlsx`,
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  toast("Exported complete workbook (8 tabs) to Excel.");
 }
 
 /* ───────────────────────── UI wiring ───────────────────────── */
@@ -860,25 +1357,36 @@ function toast(msg) {
   toast._t = setTimeout(() => t.classList.remove("show"), 4000);
 }
 
-const dz = document.getElementById("dropzone");
-const fileInput = document.getElementById("fileInput");
-dz.addEventListener("click", () => fileInput.click());
-document.getElementById("pickBtn").addEventListener("click", () => fileInput.click());
-fileInput.addEventListener("change", e => { ingestFiles(e.target.files); fileInput.value = ""; });
-["dragenter","dragover"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add("drag"); }));
-["dragleave","drop"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove("drag"); }));
-dz.addEventListener("drop", e => { if (e.dataTransfer.files.length) ingestFiles(e.dataTransfer.files); });
+function wireDropzone(zoneId, inputId, handler) {
+  const z = document.getElementById(zoneId), inp = document.getElementById(inputId);
+  z.addEventListener("click", () => inp.click());
+  inp.addEventListener("change", e => { handler(e.target.files); inp.value = ""; });
+  ["dragenter","dragover"].forEach(ev => z.addEventListener(ev, e => { e.preventDefault(); z.classList.add("drag"); }));
+  ["dragleave","drop"].forEach(ev => z.addEventListener(ev, e => { e.preventDefault(); z.classList.remove("drag"); }));
+  z.addEventListener("drop", e => { if (e.dataTransfer.files.length) handler(e.dataTransfer.files); });
+}
+wireDropzone("dropzone", "fileInput", ingestFiles);
+wireDropzone("lockedonZone", "lockedonInput", ingestLockedOn);
+document.getElementById("pickBtn").addEventListener("click", () => document.getElementById("fileInput").click());
+document.getElementById("pickLockedonBtn").addEventListener("click", () => document.getElementById("lockedonInput").click());
 
 document.getElementById("clearBtn").addEventListener("click", async () => {
-  if (confirm("Clear the entire local database? This removes every CSV you've ingested.")) {
+  if (confirm("Clear the entire local database? This removes every RP Data CSV and LockedOn contact you've ingested.")) {
     await clearSales(); await refresh(); await autosave(); toast("Database cleared.");
   }
 });
+document.getElementById("exportWorkbookBtn").addEventListener("click", exportWorkbook);
+document.getElementById("exportSellerBtn").addEventListener("click", exportSeller);
+document.getElementById("exportRentalsBtn").addEventListener("click", exportRentals);
+document.getElementById("exportPortfoliosBtn").addEventListener("click", exportPortfolios);
 document.getElementById("exportHighBtn").addEventListener("click", exportHigh);
+document.getElementById("exportBuyersBtn").addEventListener("click", exportBuyers);
 document.getElementById("exportAllBtn").addEventListener("click", exportAll);
 
 document.querySelectorAll(".tab").forEach(tab => {
   tab.addEventListener("click", () => {
+    const gs = document.getElementById("globalSearch");
+    if (gs) { gs.value = ""; document.getElementById("searchHint").textContent = ""; }
     document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
     document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
     tab.classList.add("active");
@@ -886,11 +1394,48 @@ document.querySelectorAll(".tab").forEach(tab => {
   });
 });
 
+/* Global search — address / owner / contact name */
+function runSearch(q) {
+  const panel = document.getElementById("panel-search");
+  const matchP = DATASET
+    .filter(p => (p.fullAddress + " " + p.owner1 + " " + (p.owner2 || "") + " " + p.suburb).toLowerCase().includes(q))
+    .sort((a, b) => b.combinedScore - a.combinedScore);
+  const matchB = BUYERS
+    .filter(c => (c.name + " " + (c.email || "") + " " + (c.phone || "") + " " + (c.interest || "")).toLowerCase().includes(q));
+  document.getElementById("searchHint").textContent =
+    `${matchP.length} propert${matchP.length === 1 ? "y" : "ies"}/owner${matchP.length === 1 ? "" : "s"} · ${matchB.length} contact${matchB.length === 1 ? "" : "s"}`;
+  panel.innerHTML =
+    `<h3 class="section">PROPERTIES & OWNERS (${matchP.length})</h3>` +
+    leadTable(matchP.slice(0, 500)) +
+    (matchP.length > 500 ? `<p class="muted">Showing first 500 of ${matchP.length}.</p>` : "") +
+    `<h3 class="section">BUYER LEADS / CONTACTS (${matchB.length})</h3>` +
+    buyerTable(matchB.slice(0, 500));
+}
+function showSearch(q) {
+  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+  document.getElementById("panel-search").classList.add("active");
+  runSearch(q);
+}
+function hideSearch() {
+  document.getElementById("searchHint").textContent = "";
+  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+  document.querySelector('.tab[data-tab="summary"]').classList.add("active");
+  document.getElementById("panel-summary").classList.add("active");
+}
+document.getElementById("globalSearch").addEventListener("input", e => {
+  const q = e.target.value.trim().toLowerCase();
+  if (q.length >= 2) showSearch(q);
+  else hideSearch();
+});
+
 /* Settings panel */
 function fillSettings() {
   document.getElementById("cfgPostcodes").value = CONFIG.sc_postcodes.join(", ");
   document.getElementById("cfgLongHeld").value = CONFIG.long_held_years;
   document.getElementById("cfgRecent").value = CONFIG.recent_purchase_years;
+  document.getElementById("cfgEnquiryWindow").value = CONFIG.enquiry_window_months;
   document.getElementById("cfgEntity").value = CONFIG.entity_patterns.join("\n");
   document.getElementById("cfgNonSaleable").value = CONFIG.non_saleable_patterns.join("\n");
   document.getElementById("cfgLandUse").value = CONFIG.non_saleable_land_uses.join("\n");
@@ -899,6 +1444,7 @@ document.getElementById("applyCfgBtn").addEventListener("click", async () => {
   CONFIG.sc_postcodes = document.getElementById("cfgPostcodes").value.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
   CONFIG.long_held_years = parseFloat(document.getElementById("cfgLongHeld").value) || 15;
   CONFIG.recent_purchase_years = parseFloat(document.getElementById("cfgRecent").value) || 5;
+  CONFIG.enquiry_window_months = parseFloat(document.getElementById("cfgEnquiryWindow").value) || 6;
   CONFIG.entity_patterns = document.getElementById("cfgEntity").value.split("\n").map(s => s.trim()).filter(Boolean);
   CONFIG.non_saleable_patterns = document.getElementById("cfgNonSaleable").value.split("\n").map(s => s.trim()).filter(Boolean);
   CONFIG.non_saleable_land_uses = document.getElementById("cfgLandUse").value.split("\n").map(s => s.trim()).filter(Boolean);
@@ -937,8 +1483,9 @@ async function loadHandle() {
 
 async function buildPayload() {
   const sales = await getAllSales();
+  const contacts = await getAllContacts();
   const runs = await getRuns();
-  return JSON.stringify({ app: "bpi", version: 1, exportedAt: new Date().toISOString(), sales, runs });
+  return JSON.stringify({ app: "bpi", version: 2, exportedAt: new Date().toISOString(), sales, contacts, runs });
 }
 async function writeDBFile(handle) {
   const w = await handle.createWritable();
@@ -948,17 +1495,20 @@ async function writeDBFile(handle) {
 async function readDBFile(handle) {
   const file = await handle.getFile();
   const text = await file.text();
-  if (!text.trim()) return { sales: [], runs: { count: 0, files: [] } };
+  if (!text.trim()) return { sales: [], contacts: [], runs: { count: 0, files: [] } };
   const data = JSON.parse(text);
-  return { sales: data.sales || [], runs: data.runs || { count: 0, files: [] } };
+  return { sales: data.sales || [], contacts: data.contacts || [], runs: data.runs || { count: 0, files: [] } };
 }
-async function replaceAllSales(sales, runs) {
+async function replaceAll(sales, contacts, runs) {
   const db = await openDB();
   await new Promise((res, rej) => {
-    const tx = db.transaction([STORE, META], "readwrite");
+    const tx = db.transaction([STORE, META, CONTACTS], "readwrite");
     const s = tx.objectStore(STORE);
     s.clear();
     for (const rec of sales) s.put(rec);
+    const c = tx.objectStore(CONTACTS);
+    c.clear();
+    for (const rec of (contacts || [])) c.put(rec);
     if (runs) tx.objectStore(META).put({ id: "runs", count: runs.count || 0, files: runs.files || [] });
     tx.oncomplete = () => res();
     tx.onerror = () => rej(tx.error);
@@ -1034,8 +1584,8 @@ async function reconnect() {
 }
 async function loadFromHandle(h) {
   try {
-    const { sales, runs } = await readDBFile(h);
-    await replaceAllSales(sales, runs);
+    const { sales, contacts, runs } = await readDBFile(h);
+    await replaceAll(sales, contacts, runs);
     await refresh();
   } catch (e) {
     toast("Could not read memory file: " + e.message);
@@ -1075,10 +1625,10 @@ function loadCopy() { document.getElementById("loadCopyInput").click(); }
 async function loadCopyFile(file) {
   try {
     const data = JSON.parse(await file.text());
-    await replaceAllSales(data.sales || [], data.runs || { count: 0, files: [] });
+    await replaceAll(data.sales || [], data.contacts || [], data.runs || { count: 0, files: [] });
     await refresh();
     await autosave();
-    toast(`Loaded ${(data.sales || []).length} sale records from ${file.name}.`);
+    toast(`Loaded ${(data.sales || []).length} sales + ${(data.contacts || []).length} contacts from ${file.name}.`);
   } catch (e) {
     toast("Could not load copy: " + e.message);
   }
