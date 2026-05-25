@@ -1161,15 +1161,15 @@ function portfolioMatrix(rows) {
 // "Rental Property N" column per rental (widest landlord sets N).
 function rentalsMatrix(rows) {
   const maxR = rows.reduce((m, r) => Math.max(m, (r.ownerRentalList || []).length), 0);
-  const header = ["Top Score", "Owner", "Class", "Owner Type", "Rentals", "Suburbs"];
+  const header = ["Top Score", "Owner", "Class", "Owner Type", "Rentals", "Suburbs", "Postal Address"];
   for (let i = 1; i <= maxR; i++) header.push("Rental Property " + i);
   const data = rows.map(r => {
     const list = r.ownerRentalList || [];
-    const row = [r.rentalTopScore, r.owner1, r.ownerClass, r.ownerType, r.ownerRentalCount, r.ownerRentalSuburbs || ""];
+    const row = [r.rentalTopScore, r.owner1, r.ownerClass, r.ownerType, r.ownerRentalCount, r.ownerRentalSuburbs || "", r.postalAddress || ""];
     for (let i = 0; i < maxR; i++) row.push(list[i] || "");
     return row;
   });
-  return { header, data, fixedCols: 6 };
+  return { header, data, fixedCols: 7 };
 }
 const FILTERED_COLS = [
   ["fullAddress","Address"],["propertyType","Type"],["owner1","Owner"],["landUse","Land Use"]
