@@ -231,6 +231,7 @@
       <button class="tab" data-tab="portfolios">Portfolios <span class="count" id="cnt-portfolios"></span></button>
       <button class="tab" data-tab="rentals">Rentals <span class="count" id="cnt-rentals"></span></button>
       <button class="tab" data-tab="warm">Warm Sellers <span class="count" id="cnt-warm"></span></button>
+      <button class="tab" data-tab="review">Review Matches <span class="count" id="cnt-review"></span></button>
       <button class="tab" data-tab="holding">Holding · Pending RP Data <span class="count" id="cnt-holding"></span></button>
       <button class="tab" data-tab="all">All Properties <span class="count" id="cnt-all"></span></button>
       <button class="tab" data-tab="filtered">Filtered Out <span class="count" id="cnt-filtered"></span></button>
@@ -241,6 +242,7 @@
     <div class="panel" id="panel-portfolios"></div>
     <div class="panel" id="panel-rentals"></div>
     <div class="panel" id="panel-warm"></div>
+    <div class="panel" id="panel-review"></div>
     <div class="panel" id="panel-holding"></div>
     <div class="panel" id="panel-all"></div>
     <div class="panel" id="panel-filtered"></div>
@@ -623,15 +625,35 @@ function combine(seller, rental) {
   return SCORE_MATRIX[`${seller}|${rental}`] || [1, "Skip"];
 }
 
-/* Enquiry matching — link LockedOn contacts to CURRENT SUNSHINE COAST owners.
+/* Enquiry matching — link enquirers to CURRENT SUNSHINE COAST owners.
    A contact only counts as a warm seller if they own a current SC property,
-   so the owner index is restricted to in-SC, saleable, known owners. */
+   so the owner index is restricted to in-SC, saleable, known owners. Matching
+   is strict: an AUTOMATIC warm seller needs first-name AND surname agreement.
+   Weaker (shared-surname-only) or ambiguous (multi-owner) matches are queued
+   for manual review instead of auto-flagging. */
+let REVIEW = [];   // pending uncertain (contact ↔ owner) matches awaiting approval
+
+function loadDecisions() {
+  try {
+    const s = JSON.parse(localStorage.getItem("bpi_match_decisions") || "{}");
+    return { approved: new Set(s.approved || []), rejected: new Set(s.rejected || []) };
+  } catch (e) { return { approved: new Set(), rejected: new Set() }; }
+}
+function saveDecisions() {
+  localStorage.setItem("bpi_match_decisions",
+    JSON.stringify({ approved: [...DECISIONS.approved], rejected: [...DECISIONS.rejected] }));
+}
+let DECISIONS = loadDecisions();
+function pairKey(contact, ownerName) {
+  return contact.name.toUpperCase() + "|" + (contact.email || "").toUpperCase() + "@@" + ownerName;
+}
+
 function buildOwnerIndex(parcels) {
-  const owners = new Map();          // owner name → token Set
+  const owners = new Map();          // owner name → ordered token array (first … surname)
   for (const p of parcels) {
     if (!p.inSC || p.nonSaleable) continue;
     if (["-","UNKNOWN","","NAN"].includes(p.owner1)) continue;
-    if (!owners.has(p.owner1)) owners.set(p.owner1, nameTokens(p.owner1));
+    if (!owners.has(p.owner1)) owners.set(p.owner1, Array.from(nameTokens(p.owner1)));
   }
   const tokenIndex = new Map();      // token → [owner names]
   for (const [name, toks] of owners) {
@@ -642,28 +664,56 @@ function buildOwnerIndex(parcels) {
   }
   return { owners, tokenIndex };
 }
-function ownersMatchingContact(contact, index) {
-  const counts = new Map();
-  for (const t of (contact.tokens || [])) {
-    const names = index.tokenIndex.get(t);
-    if (names) for (const n of names) counts.set(n, (counts.get(n) || 0) + 1);
-  }
-  const matched = [];
-  for (const [n, c] of counts) if (c >= 2) matched.push(n);   // need ≥2 shared tokens
-  return matched;
+// "strong" = first token AND last token agree (clean first-name + surname).
+// "uncertain" = ≥2 shared tokens but not a clean first+surname match.
+function classifyPair(cToks, oToks) {
+  let shared = 0;
+  for (const t of cToks) if (oToks.includes(t)) shared++;
+  if (shared < 2) return null;
+  const strong = cToks[0] === oToks[0] && cToks[cToks.length - 1] === oToks[oToks.length - 1];
+  return strong ? "strong" : "uncertain";
 }
-// Apply LockedOn enquiry data to parcels: tag owner matches, boost recent ones.
+function classifyContactMatches(contact, index) {
+  const cToks = contact.tokens || [];
+  const cand = new Set();
+  for (const t of cToks) { const ns = index.tokenIndex.get(t); if (ns) for (const n of ns) cand.add(n); }
+  const out = [];
+  for (const name of cand) {
+    const tier = classifyPair(cToks, index.owners.get(name));
+    if (tier) out.push({ name, tier });
+  }
+  return out;
+}
+// Apply enquiry data: confirm warm sellers, queue uncertain matches for review.
 function applyEnquiryData(parcels, contacts) {
+  REVIEW = [];
   if (!contacts || !contacts.length) return;
   const windowMs = (CONFIG.enquiry_window_months || 6) * 30.44 * 864e5;
   const boost = CONFIG.enquiry_boost || 2;
   const now = Date.now();
   const index = buildOwnerIndex(parcels);
-  const ownerEnquiry = new Map();    // owner name → most-recent matching contact
+  const ownerEnquiry = new Map();    // owner name → most-recent confirmed contact
+  const reviewMap = new Map();       // pairKey → {contact, ownerName, tier}
   for (const c of contacts) {
-    for (const n of ownersMatchingContact(c, index)) {
-      const prev = ownerEnquiry.get(n);
-      if (!prev || (c.enquiryDateMs || 0) > (prev.enquiryDateMs || 0)) ownerEnquiry.set(n, c);
+    const matches = classifyContactMatches(c, index).filter(m => !DECISIONS.rejected.has(pairKey(c, m.name)));
+    if (!matches.length) continue;
+    const approved = matches.filter(m => DECISIONS.approved.has(pairKey(c, m.name)));
+    const strongs = matches.filter(m => m.tier === "strong");
+    let confirmed = approved.map(m => m.name);
+    // Auto-confirm only when there is exactly ONE strong (first+surname) match
+    // and the user hasn't already decided this contact.
+    if (!confirmed.length && strongs.length === 1) confirmed = [strongs[0].name];
+    if (confirmed.length) {
+      for (const name of confirmed) {
+        const prev = ownerEnquiry.get(name);
+        if (!prev || (c.enquiryDateMs || 0) > (prev.enquiryDateMs || 0)) ownerEnquiry.set(name, c);
+      }
+    } else {
+      // Ambiguous or surname-only → send every candidate to review.
+      for (const m of matches) {
+        const k = pairKey(c, m.name);
+        if (!reviewMap.has(k)) reviewMap.set(k, { contact: c, ownerName: m.name, tier: m.tier });
+      }
     }
   }
   for (const p of parcels) {
@@ -674,19 +724,29 @@ function applyEnquiryData(parcels, contacts) {
     p.enquiryDateStr = c.enquiryDateStr || "";
     p.enquiryDateMs = c.enquiryDateMs;
     p.recentEnquiry = c.enquiryDateMs ? (now - c.enquiryDateMs) <= windowMs : false;
-    // Owns a current SC property AND enquired → warm seller: highlight + boost.
     if (p.inSC && !p.nonSaleable) {
       p.warmSeller = true;
       const before = p.combinedScore;
       p.combinedScore = Math.min(10, p.combinedScore + boost);
       p.enquiryBoost = p.combinedScore - before;
       p.recommendedAction = (p.recommendedAction || "") +
-        ` — WARM SELLER: enquired in LockedOn (${c.enquiryDateStr || "date n/a"}) & owns an SC property; contact directly.`;
+        ` — WARM SELLER: enquired (${c.enquiryDateStr || "date n/a"}) & owns an SC property; contact directly.`;
     }
   }
+  // Attach a representative SC parcel to each review entry (best score for that owner).
+  const ownerParcel = new Map();
+  for (const p of parcels) {
+    if (!p.inSC || p.nonSaleable) continue;
+    const cur = ownerParcel.get(p.owner1);
+    if (!cur || p.combinedScore > cur.combinedScore) ownerParcel.set(p.owner1, p);
+  }
+  REVIEW = Array.from(reviewMap.values())
+    .map(e => ({ ...e, parcel: ownerParcel.get(e.ownerName) }))
+    .filter(e => e.parcel)
+    .sort((a, b) => b.parcel.combinedScore - a.parcel.combinedScore);
 }
-// Warm sellers = current SC owners who appear as a LockedOn enquirer, deduped
-// per owner (best-scoring parcel), highest score first.
+// Warm sellers = current SC owners confirmed against an enquirer, deduped per
+// owner (best-scoring parcel), highest score first.
 function computeWarmSellers(parcels) {
   const seen = new Map();
   for (const p of parcels) {
@@ -697,15 +757,14 @@ function computeWarmSellers(parcels) {
   return Array.from(seen.values()).sort((a, b) =>
     (b.recentEnquiry - a.recentEnquiry) || (b.combinedScore - a.combinedScore));
 }
-// Holding spot — enquirers NOT confirmed as a current SC owner (either not in the
-// database, or owns nothing on the Coast). Kept so they can be cross-checked
-// against RP Data later. Deduped per person, most recent enquiry first.
+// Holding spot — enquirers with NO candidate owner in the database at all.
+// They need an RP Data lookup. Deduped per person, most recent enquiry first.
 function computeHolding(contacts, parcels) {
   if (!contacts || !contacts.length) return [];
   const index = buildOwnerIndex(parcels);
   const byPerson = new Map();
   for (const c of contacts) {
-    if (ownersMatchingContact(c, index).length) continue;   // matched a current SC owner → warm seller, not holding
+    if (classifyContactMatches(c, index).length) continue;   // has a candidate → warm or review, not holding
     const key = c.name.toUpperCase() + "|" + (c.email || "").toUpperCase();
     const prev = byPerson.get(key);
     if (!prev || (c.enquiryDateMs || 0) > (prev.enquiryDateMs || 0)) byPerson.set(key, c);
@@ -1057,6 +1116,7 @@ function renderDashboard() {
   setCount("portfolios", portfolios.length);
   setCount("rentals", rentals.length);
   setCount("warm", WARM.length);
+  setCount("review", REVIEW.length);
   setCount("holding", HOLDING.length);
   setCount("all", DATASET.length);
   setCount("filtered", filtered.length);
@@ -1078,6 +1138,7 @@ function renderDashboard() {
   document.getElementById("panel-filtered").innerHTML = filteredTable(filtered);
   document.getElementById("panel-portfolios").innerHTML = portfolioTable(portfolios);
   document.getElementById("panel-warm").innerHTML = warmTable(WARM);
+  document.getElementById("panel-review").innerHTML = reviewTable(REVIEW);
   document.getElementById("panel-holding").innerHTML = holdingTable(HOLDING);
   renderAllPanel(DATASET);
 }
@@ -1135,6 +1196,29 @@ function warmTable(rows) {
     </tr>`).join("");
   return `<div class="table-scroll"><table>
     <thead><tr><th>Score</th><th>Warm</th><th>Enquirer (LockedOn)</th><th>Owner (database)</th><th>SC Property Owned</th><th>Suburb</th><th>Props</th><th>Seller</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+}
+function reviewTable(rows) {
+  if (!rows.length) return `<div class="empty">No matches to review. Ambiguous enquirer→owner matches (shared surname only, or one enquirer hitting several owners) appear here for you to approve or reject.</div>`;
+  const body = rows.map((e, i) => {
+    const p = e.parcel;
+    const why = e.tier === "uncertain" ? "shared surname, different first name" : "one enquirer matches several owners";
+    return `<tr>
+      <td>${esc(e.contact.name)}</td>
+      <td>${esc(e.contact.email)}</td>
+      <td>${esc(e.ownerName)}</td>
+      <td>${esc(p.fullAddress)}</td>
+      <td>${esc(p.suburbName)}</td>
+      <td class="muted">${why}</td>
+      <td style="white-space:nowrap;">
+        <button class="primary" data-review="approve" data-idx="${i}">✓ Warm seller</button>
+        <button data-review="reject" data-idx="${i}">✕ Not a match</button>
+      </td>
+    </tr>`;
+  }).join("");
+  return `<div class="filterbar"><span class="muted">Approve a row to flag that owner as a warm seller (+2); reject to dismiss it. Decisions are remembered.</span></div>
+    <div class="table-scroll"><table>
+    <thead><tr><th>Enquirer</th><th>Email</th><th>Possible owner (database)</th><th>SC Property</th><th>Suburb</th><th>Why uncertain</th><th>Decision</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 function holdingTable(rows) {
@@ -1582,6 +1666,20 @@ document.querySelectorAll(".tab").forEach(tab => {
     tab.classList.add("active");
     document.getElementById("panel-" + tab.dataset.tab).classList.add("active");
   });
+});
+
+/* Review Matches — approve/reject uncertain enquirer↔owner pairs */
+document.getElementById("panel-review").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-review]");
+  if (!btn) return;
+  const entry = REVIEW[parseInt(btn.dataset.idx, 10)];
+  if (!entry) return;
+  const key = pairKey(entry.contact, entry.ownerName);
+  if (btn.dataset.review === "approve") { DECISIONS.approved.add(key); DECISIONS.rejected.delete(key); }
+  else { DECISIONS.rejected.add(key); DECISIONS.approved.delete(key); }
+  saveDecisions();
+  refresh();
+  toast(btn.dataset.review === "approve" ? "Approved — flagged as warm seller." : "Rejected — match dismissed.");
 });
 
 /* Global search — address / owner / enquirer name */

@@ -62,6 +62,18 @@ ENQUIRY DATA  (LockedOn  OR  RP Data enquiries)
     They appear in the Warm Sellers tab and are starred wherever
     they show up. (Recency window tunable in Scoring settings.)
 
+  - Matching is STRICT: a name is auto-flagged warm only when the
+    first name AND surname agree (e.g. "Darlene Burnett" =
+    "Darlene Denise Burnett"). This avoids false hits from common
+    names.
+
+  - REVIEW MATCHES tab: when a match is uncertain — same surname
+    but a different first name, or one enquirer hitting several
+    owners (e.g. "Peter James" matching three different owners) —
+    it's listed here instead of auto-flagged. Click "✓ Warm
+    seller" to confirm (that owner then gets the star + 2 points)
+    or "✕ Not a match" to dismiss. Your decisions are remembered.
+
   - HOLDING (Pending RP Data): an enquirer who is NOT yet
     confirmed as a current SC owner lands in the Holding tab.
     These are people to look up: pull their RP Data, drop the
