@@ -138,7 +138,7 @@
     <h1>BATCH PROPERTY INTELLIGENCE</h1>
     <div class="sub">Elite Lifestyle Properties — Intelligence Hub (browser edition)</div>
   </div>
-  <div class="sub" id="versionTag">V2.0 · 25 May 2026 · runs entirely on your machine · no data leaves the browser</div>
+  <div class="sub" id="versionTag">V2.1 · 27 May 2026 · runs entirely on your machine · no data leaves the browser</div>
 </header>
 
 <div class="wrap">
@@ -160,6 +160,8 @@
   <div class="toolbar">
     <button class="primary" id="pickBtn">Pick RP Data CSV…</button>
     <button id="pickLockedonBtn">Pick LockedOn CSV…</button>
+    <button id="pickEnrichBtn">Update postal/notes from sheet…</button>
+    <input type="file" id="enrichInput" hidden>
     <button class="danger" id="clearBtn">Clear database</button>
     <div class="dbstat" id="dbstat">Database empty</div>
   </div>
@@ -653,6 +655,27 @@ function pairKey(contact, ownerName) {
   return contact.name.toUpperCase() + "|" + (contact.email || "").toUpperCase() + "@@" + ownerName;
 }
 
+/* Manual enrichment — owner mailing address + notes the user types into the
+   exported sheet. Keyed by owner name; persisted (localStorage + memory file)
+   and merged on every recompute. Uploads never overwrite these. */
+function loadManual() {
+  try {
+    const s = JSON.parse(localStorage.getItem("bpi_manual") || "{}");
+    return { postalByOwner: s.postalByOwner || {}, notesByOwner: s.notesByOwner || {} };
+  } catch (e) { return { postalByOwner: {}, notesByOwner: {} }; }
+}
+function saveManual() { localStorage.setItem("bpi_manual", JSON.stringify(MANUAL)); }
+let MANUAL = loadManual();
+// Manual data wins over RP Data (RP doesn't export postal anyway).
+function applyManual(parcels) {
+  for (const p of parcels) {
+    const mp = MANUAL.postalByOwner[p.owner1];
+    if (mp) p.postalAddress = mp;
+    const mn = MANUAL.notesByOwner[p.owner1];
+    p.ownerNotes = mn || "";
+  }
+}
+
 function buildOwnerIndex(parcels) {
   const owners = new Map();          // owner name → ordered token array (first … surname)
   for (const p of parcels) {
@@ -847,6 +870,7 @@ function recompute(allSales, contacts = []) {
     p.enquiryContact = "";
     p.enquiryDateStr = "";
   }
+  applyManual(parcels);
   applyEnquiryData(parcels, contacts);
   return parcels;
 }
@@ -1028,6 +1052,41 @@ async function ingestLockedOn(fileList) {
   if (errors.length) toast("Enquiry import issues:\n" + errors.join("\n"));
   else if (totalRows) toast(`Loaded ${totalRows} enquiries (${totalNew} new). Mapped: ${detectedMsg}`);
   else if (cancelled) toast("Import cancelled.");
+}
+
+// Read an edited export sheet and absorb manual Owner → Postal Address / Notes.
+// Only non-empty cells are taken, so this never wipes existing entries.
+async function ingestEnrichment(file) {
+  try {
+    const text = await file.text();
+    const rows = parseCSV(text).filter(r => r.some(c => (c || "").trim() !== ""));
+    if (!rows.length) { toast("Empty file."); return; }
+    const lower = rows[0].map(h => h.trim().toLowerCase());
+    const findc = names => {
+      for (const n of names) { const i = lower.indexOf(n); if (i !== -1) return i; }
+      for (const n of names) { const i = lower.findIndex(h => h.includes(n)); if (i !== -1) return i; }
+      return -1;
+    };
+    const oc = findc(["owner (database)", "owner 1", "owner name", "owner"]);
+    const pc = findc(["postal address", "mailing address", "owner mailing address"]);
+    const nc = findc(["notes", "note"]);
+    if (oc === -1) { toast("No Owner column found in that sheet."); return; }
+    if (pc === -1 && nc === -1) { toast("No Postal Address or Notes column found."); return; }
+    let nP = 0, nN = 0;
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      const owner = normName((r[oc] || "").trim());
+      if (!owner || owner === "-") continue;
+      if (pc !== -1) { const v = (r[pc] || "").trim(); if (v) { MANUAL.postalByOwner[owner] = v; nP++; } }
+      if (nc !== -1) { const v = (r[nc] || "").trim(); if (v) { MANUAL.notesByOwner[owner] = v; nN++; } }
+    }
+    saveManual();
+    await refresh();
+    await autosave();
+    toast(`Updated ${nP} postal address${nP === 1 ? "" : "es"}${nc !== -1 ? ` and ${nN} note${nN === 1 ? "" : "s"}` : ""} from ${file.name}.`);
+  } catch (e) {
+    toast("Could not read sheet: " + e.message);
+  }
 }
 
 async function ingestFiles(fileList) {
@@ -1340,7 +1399,7 @@ const EXPORT_COLS = [
   ["fullAddress","Address"],["suburbName","Suburb"],["propertyType","Property Type"],
   ["bed","Bed"],["bath","Bath"],["car","Car"],["landSize","Land Size m2"],["yearBuilt","Year Built"],
   ["owner1","Owner 1"],["ownerClass","Owner Class"],["ownerType","Owner Type"],["jointOwner","Joint Owner"],
-  ["owner2","Owner 2"],["postalAddress","Postal Address"],
+  ["owner2","Owner 2"],["postalAddress","Postal Address"],["ownerNotes","Notes"],
   ["ownerPropertyCount","Owner Property Count"],["ownerRentalCount","Owner Rental Count"],
   ["ownerProperties","Owner Properties"],["ownerRentals","Owner Rentals"],["portfolioInvestor","Portfolio Investor"],
   ["saleDateStr","Sale Date"],["salePrice","Sale Price"],["yearsSinceSale","Years Since Sale"],
@@ -1350,7 +1409,7 @@ const EXPORT_COLS = [
 const WARM_COLS = [
   ["combinedScore","Score"],["enquiryContact","Enquirer (LockedOn)"],["enquiryDateStr","Enquiry Date"],
   ["owner1","Owner (database)"],["fullAddress","SC Property Owned"],["suburbName","Suburb"],
-  ["postalAddress","Postal Address"],["ownerPropertyCount","Properties Owned"],
+  ["postalAddress","Postal Address"],["ownerNotes","Notes"],["ownerPropertyCount","Properties Owned"],
   ["sellerLead","Seller Lead"],["ownerType","Owner Type"],["recommendedAction","Recommended Action"]
 ];
 const HOLDING_COLS = [
@@ -1659,6 +1718,8 @@ wireDropzone("dropzone", "fileInput", ingestFiles);
 wireDropzone("lockedonZone", "lockedonInput", ingestLockedOn);
 document.getElementById("pickBtn").addEventListener("click", () => document.getElementById("fileInput").click());
 document.getElementById("pickLockedonBtn").addEventListener("click", () => document.getElementById("lockedonInput").click());
+document.getElementById("pickEnrichBtn").addEventListener("click", () => document.getElementById("enrichInput").click());
+document.getElementById("enrichInput").addEventListener("change", e => { if (e.target.files[0]) ingestEnrichment(e.target.files[0]); e.target.value = ""; });
 
 document.getElementById("clearBtn").addEventListener("click", async () => {
   if (confirm("Clear the entire local database? This removes every RP Data CSV and LockedOn contact you've ingested.")) {
@@ -1792,10 +1853,11 @@ async function buildPayload() {
   const contacts = await getAllContacts();
   const runs = await getRuns();
   return JSON.stringify({
-    app: "bpi", version: 3, exportedAt: new Date().toISOString(),
+    app: "bpi", version: 4, exportedAt: new Date().toISOString(),
     sales, contacts, runs,
     config: CONFIG,
-    decisions: { approved: [...DECISIONS.approved], rejected: [...DECISIONS.rejected] }
+    decisions: { approved: [...DECISIONS.approved], rejected: [...DECISIONS.rejected] },
+    manual: MANUAL
   });
 }
 async function writeDBFile(handle) {
@@ -1806,18 +1868,22 @@ async function writeDBFile(handle) {
 async function readDBFile(handle) {
   const file = await handle.getFile();
   const text = await file.text();
-  if (!text.trim()) return { sales: [], contacts: [], runs: { count: 0, files: [] }, config: null, decisions: null };
+  if (!text.trim()) return { sales: [], contacts: [], runs: { count: 0, files: [] }, config: null, decisions: null, manual: null };
   const data = JSON.parse(text);
   return {
     sales: data.sales || [], contacts: data.contacts || [], runs: data.runs || { count: 0, files: [] },
-    config: data.config || null, decisions: data.decisions || null
+    config: data.config || null, decisions: data.decisions || null, manual: data.manual || null
   };
 }
-// Apply config + match decisions loaded from the memory file (globals + local cache).
-function applyLoadedExtras(config, decisions) {
+// Apply config + match decisions + manual enrichment loaded from the memory file.
+function applyLoadedExtras(config, decisions, manual) {
   if (decisions) {
     DECISIONS = { approved: new Set(decisions.approved || []), rejected: new Set(decisions.rejected || []) };
     saveDecisions();
+  }
+  if (manual) {
+    MANUAL = { postalByOwner: manual.postalByOwner || {}, notesByOwner: manual.notesByOwner || {} };
+    saveManual();
   }
   if (config) {
     CONFIG = Object.assign({}, DEFAULT_CONFIG, config);
@@ -1910,8 +1976,8 @@ async function reconnect() {
 }
 async function loadFromHandle(h) {
   try {
-    const { sales, contacts, runs, config, decisions } = await readDBFile(h);
-    applyLoadedExtras(config, decisions);
+    const { sales, contacts, runs, config, decisions, manual } = await readDBFile(h);
+    applyLoadedExtras(config, decisions, manual);
     await replaceAll(sales, contacts, runs);
     await refresh();
   } catch (e) {
@@ -1952,7 +2018,7 @@ function loadCopy() { document.getElementById("loadCopyInput").click(); }
 async function loadCopyFile(file) {
   try {
     const data = JSON.parse(await file.text());
-    applyLoadedExtras(data.config || null, data.decisions || null);
+    applyLoadedExtras(data.config || null, data.decisions || null, data.manual || null);
     await replaceAll(data.sales || [], data.contacts || [], data.runs || { count: 0, files: [] });
     await refresh();
     await autosave();

@@ -119,6 +119,30 @@ EXPORTS
     on "All suburbs" for the full set. The chosen suburb is added
     to the file name.
 
+================================================================
+POSTAL ADDRESSES / NOTES  (maintaining the master)
+================================================================
+
+  RP Data doesn't export a postal/mailing address, so that column
+  comes out blank. You can fill it in yourself and the tool will
+  KEEP it — uploads never overwrite your entries.
+
+  1. Export any list that has an Owner + Postal Address column
+     (e.g. All Properties, Warm Sellers) — or the complete
+     workbook.
+  2. In Excel, type the owner's mailing address into the Postal
+     Address column (and anything you like into Notes).
+  3. Back in the app, click "Update postal/notes from sheet..."
+     and pick that file.
+
+  The tool reads Owner + Postal Address (+ Notes), stores them
+  PER OWNER, and applies them to every one of that owner's
+  properties. Only non-blank cells are taken, so it never wipes
+  what you've entered. Everything is saved into the OneDrive
+  memory file, so your postal addresses follow you and survive
+  future RP Data / enquiry uploads. Re-export any time for an
+  up-to-date master.
+
   - Portfolios tab/export lists each of an owner's Sunshine
     Coast holdings in its OWN column (SC Property 1, SC Property
     2, ...). It also has a Postal Address column — populated if
