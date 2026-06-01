@@ -141,7 +141,7 @@
     <h1>BATCH INTELLIGENCE HUB</h1>
     <div class="sub">Elite Lifestyle Properties — browser edition</div>
   </div>
-  <div class="sub" id="versionTag">V3.0 · 1 June 2026 · runs entirely on your machine · no data leaves the browser</div>
+  <div class="sub" id="versionTag">V3.1 · 1 June 2026 · runs entirely on your machine · no data leaves the browser</div>
 </header>
 
 <div class="wrap">
@@ -228,6 +228,10 @@
       <button class="primary" id="applyCfgBtn">Apply &amp; recompute</button>
       <button id="resetCfgBtn">Reset to defaults</button>
     </div>
+    <h3 style="margin:8px 0;color:var(--elite-black);font-size:13px;letter-spacing:1px;">PROPERTY MANAGER → PORTFOLIO MAPPING</h3>
+    <p class="muted" style="margin:0 0 8px;">When you upload an Owner export, the picker pre-fills the portfolio based on the file's Property Manager. Adjust here and save — changes apply on the next upload and are persisted in your OneDrive memory file.</p>
+    <div id="pmMapRows"></div>
+    <button id="savePmMapBtn" style="margin-top:8px;">Save PM mappings</button>
   </details>
 
   <div id="dashboard" style="display:none;">
@@ -744,8 +748,8 @@ function addressKey(street, suburb, state, postcode) {
 function loadManaged() {
   try {
     const s = JSON.parse(localStorage.getItem("bpi_managed") || "{}");
-    return { byOwner: s.byOwner || {}, byAddressKey: s.byAddressKey || {} };
-  } catch (e) { return { byOwner: {}, byAddressKey: {} }; }
+    return { byOwner: s.byOwner || {}, byAddressKey: s.byAddressKey || {}, pmPortfolioMap: s.pmPortfolioMap || {} };
+  } catch (e) { return { byOwner: {}, byAddressKey: {}, pmPortfolioMap: {} }; }
 }
 function saveManaged() { localStorage.setItem("bpi_managed", JSON.stringify(MANAGED)); }
 let MANAGED = loadManaged();
@@ -1249,12 +1253,34 @@ function detectPortfolioFromName(fileName) {
   if (/residential/.test(n)) return "Residential";
   return "";
 }
+// Pick the most common Property Manager in a parsed Owner Export — usually
+// each file is one PM, but use the mode just in case.
+function dominantPM(parsed) {
+  if (parsed.col.pm === -1) return "";
+  const counts = {};
+  for (let i = 1; i < parsed.rows.length; i++) {
+    const pm = (parsed.rows[i][parsed.col.pm] || "").trim();
+    if (pm) counts[pm] = (counts[pm] || 0) + 1;
+  }
+  let best = "", bestN = 0;
+  for (const [pm, n] of Object.entries(counts)) if (n > bestN) { best = pm; bestN = n; }
+  return best;
+}
+function uniquePMsInFile(parsed) {
+  if (parsed.col.pm === -1) return [];
+  const set = new Set();
+  for (let i = 1; i < parsed.rows.length; i++) {
+    const pm = (parsed.rows[i][parsed.col.pm] || "").trim();
+    if (pm) set.add(pm);
+  }
+  return Array.from(set);
+}
 // Tiny portfolio-picker modal. Resolves to chosen label or false on cancel.
-function showPortfolioDialog(fileName, defaultLabel) {
+function showPortfolioDialog(fileName, defaultLabel, hintText) {
   return new Promise(resolve => {
     const modal = document.getElementById("mapModal");
-    document.getElementById("mapSubtitle").innerHTML =
-      `<b>${esc(fileName)}</b> — which portfolio does this upload represent? The label is stored against every address in this file (a 'Portfolio' column inside the file, if present, will override this per row).`;
+    const base = `<b>${esc(fileName)}</b> — which portfolio does this upload represent? The label is stored against every address in this file (a 'Portfolio' column inside the file, if present, will override this per row).`;
+    document.getElementById("mapSubtitle").innerHTML = base + (hintText ? `<br><span class="muted">${esc(hintText)}</span>` : "");
     const opts = ["Residential", "Residential 1", "Residential 2"];
     document.getElementById("mapRows").innerHTML = `<div class="map-row"><label>Portfolio</label><select id="pfSelect">` +
       opts.map(o => `<option value="${o}" ${o === defaultLabel ? "selected" : ""}>${o}</option>`).join("") +
@@ -1279,9 +1305,19 @@ async function ingestManaged(file) {
   try {
     const text = await file.text();
     const parsed = csvToManaged(text);
-    const suggested = detectPortfolioFromName(file.name) || "Residential";
-    const portfolio = await showPortfolioDialog(file.name, suggested);
+    const pm = dominantPM(parsed);
+    const pms = uniquePMsInFile(parsed);
+    const remembered = pm && MANAGED.pmPortfolioMap[pm];
+    const suggested = remembered || detectPortfolioFromName(file.name) || "Residential";
+    const hint = pm
+      ? (remembered
+          ? `Property Manager "${pm}" → remembered as "${remembered}".`
+          : `Property Manager detected: "${pm}". The mapping is saved for next time.`)
+      : "";
+    const portfolio = await showPortfolioDialog(file.name, suggested, hint);
     if (!portfolio) { toast("Import cancelled."); return; }
+    // Remember every PM in this file → chosen portfolio. User can edit later in Settings.
+    for (const p of pms) MANAGED.pmPortfolioMap[p] = portfolio;
     const { rows, header, col } = parsed;
     const at = (r, i) => (i >= 0 && i < r.length ? (r[i] || "").trim() : "");
     let added = 0, owners = 0;
@@ -2095,7 +2131,39 @@ function fillSettings() {
   document.getElementById("cfgEntity").value = CONFIG.entity_patterns.join("\n");
   document.getElementById("cfgNonSaleable").value = CONFIG.non_saleable_patterns.join("\n");
   document.getElementById("cfgLandUse").value = CONFIG.non_saleable_land_uses.join("\n");
+  renderPmMap();
 }
+// Show every PM seen in MANAGED (both via byAddressKey and via pmPortfolioMap),
+// with a dropdown to set the portfolio for each.
+function renderPmMap() {
+  const host = document.getElementById("pmMapRows");
+  if (!host) return;
+  const pmsSet = new Set(Object.keys(MANAGED.pmPortfolioMap));
+  for (const v of Object.values(MANAGED.byAddressKey)) if (v.propertyManager) pmsSet.add(v.propertyManager);
+  const pms = Array.from(pmsSet).sort();
+  if (!pms.length) { host.innerHTML = `<p class="muted" style="margin:0;">No Property Managers known yet — upload a Managed Properties CSV first.</p>`; return; }
+  const opts = ["Residential", "Residential 1", "Residential 2"];
+  host.innerHTML = pms.map(pm => {
+    const cur = MANAGED.pmPortfolioMap[pm] || "";
+    return `<div style="display:grid;grid-template-columns:1fr 200px;gap:10px;align-items:center;margin:4px 0;">
+      <div style="font-weight:600;">${esc(pm)}</div>
+      <select data-pm="${esc(pm)}" style="padding:4px;border:1px solid #ccc;border-radius:4px;">
+        <option value="">— pick —</option>
+        ${opts.map(o => `<option value="${o}" ${o === cur ? "selected" : ""}>${o}</option>`).join("")}
+      </select>
+    </div>`;
+  }).join("");
+}
+document.getElementById("savePmMapBtn").addEventListener("click", async () => {
+  document.querySelectorAll('#pmMapRows select[data-pm]').forEach(s => {
+    const pm = s.dataset.pm, v = s.value;
+    if (v) MANAGED.pmPortfolioMap[pm] = v;
+    else delete MANAGED.pmPortfolioMap[pm];
+  });
+  saveManaged();
+  await autosave();
+  toast("Property Manager mappings saved.");
+});
 document.getElementById("applyCfgBtn").addEventListener("click", async () => {
   CONFIG.sc_postcodes = document.getElementById("cfgPostcodes").value.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
   CONFIG.long_held_years = parseFloat(document.getElementById("cfgLongHeld").value) || 15;
@@ -2179,7 +2247,7 @@ function applyLoadedExtras(config, decisions, manual, managed) {
     saveManual();
   }
   if (managed) {
-    MANAGED = { byOwner: managed.byOwner || {}, byAddressKey: managed.byAddressKey || {} };
+    MANAGED = { byOwner: managed.byOwner || {}, byAddressKey: managed.byAddressKey || {}, pmPortfolioMap: managed.pmPortfolioMap || {} };
     saveManaged();
   }
   if (config) {

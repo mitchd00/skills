@@ -1,4 +1,4 @@
-BATCH INTELLIGENCE HUB — Browser Edition  (V3.0)
+BATCH INTELLIGENCE HUB — Browser Edition  (V3.1)
 Elite Lifestyle Properties
 
 ================================================================
@@ -60,10 +60,21 @@ UNDER MANAGEMENT  (Properties we already manage)
     "Pick Managed Properties CSV..." button.
 
   - On upload a small dialog asks which portfolio it represents
-    (Residential / Residential 1 / Residential 2). It's auto-
-    suggested from the filename; override with the dropdown.
+    (Residential / Residential 1 / Residential 2). The default
+    is picked in this order:
+      1. Property Manager → Portfolio mapping you've saved
+         (e.g. "Cheyenne O'Leary" → Residential).
+      2. Filename keywords (e.g. residential_1 → Residential 1).
+      3. Plain "Residential".
+    Override the dropdown if you want, and your choice is
+    remembered for that Property Manager next time.
     If the CSV itself has a Portfolio column, that value wins
     per row.
+
+  - To VIEW or EDIT the PM → Portfolio mappings later, open
+    "Scoring settings" and scroll to "Property Manager →
+    Portfolio Mapping". Change any row's dropdown and click
+    "Save PM mappings". Saved into your OneDrive memory file.
 
   - The tool builds two indexes from the file:
       • PER-OWNER  — every owner name is flagged "under
