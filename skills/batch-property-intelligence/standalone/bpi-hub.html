@@ -105,11 +105,14 @@
   .panel.active { display: block; }
 
   table { width: 100%; border-collapse: collapse; background: #fff; font-size: 12px; }
-  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: top; white-space: nowrap; }
   th { background: var(--elite-black); color: #fff; position: sticky; top: 0; font-size: 11px; white-space: nowrap; }
   tr.s10, tr.s9, tr.s8 { background: var(--light-gold); }
   tr.s10 td, tr.s9 td, tr.s8 td { font-weight: 600; }
   .table-scroll { max-height: 70vh; overflow: auto; border: 1px solid var(--line); }
+  .table-scroll table { width: max-content; min-width: 100%; }
+  /* Long free-text cells (Recommended Action, Owner Properties, addresses) wrap inside their own cell. */
+  td.wrap, .table-scroll td:nth-last-child(1) { white-space: normal; max-width: 360px; }
   .grade { display: inline-block; padding: 1px 7px; border-radius: 3px; font-size: 11px; font-weight: 700; }
   .HIGH { background: var(--muted-gold); color: #fff; }
   .MEDIUM { background: var(--light-gold); color: var(--soft-charcoal); }
@@ -141,7 +144,7 @@
     <h1>BATCH INTELLIGENCE HUB</h1>
     <div class="sub">Elite Lifestyle Properties — browser edition</div>
   </div>
-  <div class="sub" id="versionTag">V3.2 · 1 June 2026 · runs entirely on your machine · no data leaves the browser</div>
+  <div class="sub" id="versionTag">V3.3 · 1 June 2026 · runs entirely on your machine · no data leaves the browser</div>
 </header>
 
 <div class="wrap">
@@ -1484,11 +1487,11 @@ function renderDashboard() {
   const hot = saleable.filter(p => p.combinedScore > 10 && p.combinedScore <= 15).length;
   const managedRows = saleable.filter(p => p.managedHere);
   document.getElementById("statGrid").innerHTML = [
-    card(flaming, "🔥🔥 Flaming Hot (>15)"),
-    card(hot, "🔥 Hot (>10)"),
+    card(DATASET.length, "Total parcels"),
     card(WARM.length, "Warm sellers"),
     card(managedRows.length, "Properties under management"),
-    card(DATASET.length, "Total parcels"),
+    card(flaming, "🔥🔥 Flaming Hot (>15)"),
+    card(hot, "🔥 Hot (>10)"),
     card(owners2, "Multi-property owners"),
   ].join("");
 
