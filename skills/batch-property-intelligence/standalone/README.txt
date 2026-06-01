@@ -1,5 +1,12 @@
-BATCH INTELLIGENCE HUB — Browser Edition  (V3.2)
+BATCH INTELLIGENCE HUB — Browser Edition  (V3.4)
 Elite Lifestyle Properties
+
+V3.4 is mobile-friendly. Open bpi-hub.html on an iPhone (use
+Safari, then "Add to Home Screen" if you want it as an icon).
+The tab bar swipes left/right, stat cards reflow to 2-per-row,
+modals stack vertically, and the search box fills the screen.
+Recommended-action / suggestion copy is also shorter so rows
+stay compact on a small screen.
 
 V3.2 fixes a counting bug where letter-suffixed street numbers
 (e.g. 19A Aroona Av, Unit 10N / 143 Lowanna Dr, 2A Hill St) used to

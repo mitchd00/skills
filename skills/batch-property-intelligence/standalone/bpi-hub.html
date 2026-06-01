@@ -136,6 +136,60 @@
   .muted { color: #a39c8b; font-size: 12px; }
   h3.section { color: var(--muted-gold); letter-spacing: 1px; font-size: 13px; border-bottom: 1px solid var(--muted-gold); padding-bottom: 5px; margin-top: 28px; }
   footer { text-align: center; color: #a39c8b; font-size: 11px; padding: 24px; border-top: 1px solid var(--line); margin-top: 40px; }
+  /* ─── iPhone / narrow viewport (≤ 720 px) ─── */
+  @media (max-width: 720px) {
+    body { padding-bottom: env(safe-area-inset-bottom); }
+    .wrap { padding: 0 12px 48px; }
+    header { padding: 14px 12px 10px; }
+    header h1 { font-size: 16px; letter-spacing: 1px; }
+    header .sub { font-size: 11px; }
+    #versionTag { font-size: 10px; }
+    .dropzone { padding: 18px; }
+    .dropzone h2 { font-size: 14px; }
+    .dropzone p { font-size: 12px; }
+    .dropzone.lockedon { padding: 14px; }
+    .toolbar { gap: 6px; }
+    .toolbar button { flex: 1 1 calc(50% - 4px); min-height: 40px; padding: 8px 10px; }
+    .dbstat { margin-left: 0; width: 100%; text-align: center; padding: 6px 0; }
+    /* TABS: swipe left/right, sticky at top, big tap targets */
+    .tabs {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scroll-snap-type: x proximity;
+      padding-bottom: 4px;
+      position: sticky;
+      top: 0;
+      background: var(--warm-white);
+      z-index: 5;
+      margin-top: 12px;
+    }
+    .tabs::-webkit-scrollbar { height: 4px; }
+    .tabs::-webkit-scrollbar-thumb { background: var(--muted-gold); border-radius: 2px; }
+    .tab { flex-shrink: 0; padding: 12px 14px; min-height: 44px; scroll-snap-align: start; }
+    /* STATS: 2 per row */
+    .stat-grid { grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
+    .stat { padding: 10px; }
+    .stat .num { font-size: 22px; }
+    .stat .label { font-size: 10px; }
+    /* SEARCH: full width, no iOS zoom */
+    .filterbar input, #globalSearch { width: 100% !important; box-sizing: border-box; }
+    /* iOS zooms inputs/selects under 16px — force ≥16px */
+    input, select, textarea { font-size: 16px; }
+    /* MODAL: tighter, stack rows + actions */
+    .modal { padding: 16px; max-height: 92vh; }
+    .modal .map-row { grid-template-columns: 1fr; gap: 4px; }
+    .modal-actions { flex-direction: column; }
+    .modal-actions button { width: 100%; min-height: 44px; }
+    /* SETTINGS: single column */
+    details.settings { padding: 0 12px; }
+    details.settings .grid { grid-template-columns: 1fr; }
+    details.settings textarea { height: 90px; }
+    /* TABLE: keep horizontal scroll, but cap viewport height shorter */
+    .table-scroll { max-height: 60vh; }
+    .table-scroll td:nth-last-child(1) { max-width: 220px; }
+    td.score, td:first-child { white-space: nowrap; }
+  }
 </style>
 </head>
 <body>
@@ -144,7 +198,7 @@
     <h1>BATCH INTELLIGENCE HUB</h1>
     <div class="sub">Elite Lifestyle Properties — browser edition</div>
   </div>
-  <div class="sub" id="versionTag">V3.3 · 1 June 2026 · runs entirely on your machine · no data leaves the browser</div>
+  <div class="sub" id="versionTag">V3.4 · 1 June 2026 · runs entirely on your machine · no data leaves the browser</div>
 </header>
 
 <div class="wrap">
@@ -830,7 +884,7 @@ function applyManagedBoost(parcels) {
     p.managedBoost = p.combinedScore - before;
     if (p.managedBoost > 0) {
       p.recommendedAction = (p.recommendedAction || "") +
-        ` — UNDER MANAGEMENT${p.managedPortfolio ? " (" + p.managedPortfolio + ")" : ""}: already a client.`;
+        ` — UM${p.managedPortfolio ? " · " + p.managedPortfolio : ""} · client.`;
     }
   }
 }
@@ -922,7 +976,7 @@ function applyEnquiryData(parcels, contacts) {
       p.combinedScore = Math.min(CONFIG.score_cap || 20, p.combinedScore + boost);
       p.enquiryBoost = p.combinedScore - before;
       p.recommendedAction = (p.recommendedAction || "") +
-        ` — WARM SELLER: enquired (${c.enquiryDateStr || "date n/a"}) & owns an SC property; contact directly.`;
+        ` — WARM (${c.enquiryDateStr || "no date"}).`;
     }
   }
   // Attach a representative SC parcel to each review entry (best score for that owner).
@@ -1169,7 +1223,7 @@ function showMappingDialog(fileName, header, col, method) {
   return new Promise(resolve => {
     const modal = document.getElementById("mapModal");
     document.getElementById("mapSubtitle").innerHTML =
-      `<b>${esc(fileName)}</b> — columns matched automatically. Anything flagged <span class="uncertain">(check)</span> was matched loosely; confirm or correct it, then import.`;
+      `<b>${esc(fileName)}</b> — confirm columns. <span class="uncertain">(check)</span> = matched loosely.`;
     const options = sel => ['<option value="-1">— none —</option>']
       .concat(header.map((h, i) => `<option value="${i}" ${i === sel ? "selected" : ""}>${esc(h)}</option>`)).join("");
     document.getElementById("mapRows").innerHTML = MAP_FIELDS.map(([f, label]) => {
@@ -1313,7 +1367,7 @@ function uniquePMsInFile(parsed) {
 function showPortfolioDialog(fileName, defaultLabel, hintText) {
   return new Promise(resolve => {
     const modal = document.getElementById("mapModal");
-    const base = `<b>${esc(fileName)}</b> — which portfolio does this upload represent? The label is stored against every address in this file (a 'Portfolio' column inside the file, if present, will override this per row).`;
+    const base = `<b>${esc(fileName)}</b> — pick portfolio. <span class="muted">(A Portfolio column in the file wins per row.)</span>`;
     document.getElementById("mapSubtitle").innerHTML = base + (hintText ? `<br><span class="muted">${esc(hintText)}</span>` : "");
     const opts = ["Residential", "Residential 1", "Residential 2"];
     document.getElementById("mapRows").innerHTML = `<div class="map-row"><label>Portfolio</label><select id="pfSelect">` +
@@ -1489,10 +1543,10 @@ function renderDashboard() {
   document.getElementById("statGrid").innerHTML = [
     card(DATASET.length, "Total parcels"),
     card(WARM.length, "Warm sellers"),
-    card(managedRows.length, "Properties under management"),
-    card(flaming, "🔥🔥 Flaming Hot (>15)"),
-    card(hot, "🔥 Hot (>10)"),
-    card(owners2, "Multi-property owners"),
+    card(managedRows.length, "Under management"),
+    card(flaming, "🔥🔥 FLAMING"),
+    card(hot, "🔥 HOT"),
+    card(owners2, "Multi-property"),
   ].join("");
 
   setCount("high", high.length);
@@ -2116,6 +2170,7 @@ document.querySelectorAll(".tab").forEach(tab => {
     document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
     tab.classList.add("active");
     document.getElementById("panel-" + tab.dataset.tab).classList.add("active");
+    tab.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
   });
 });
 
