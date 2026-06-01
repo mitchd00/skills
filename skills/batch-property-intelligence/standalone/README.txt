@@ -1,5 +1,14 @@
-BATCH INTELLIGENCE HUB — Browser Edition  (V3.1)
+BATCH INTELLIGENCE HUB — Browser Edition  (V3.2)
 Elite Lifestyle Properties
+
+V3.2 fixes a counting bug where letter-suffixed street numbers
+(e.g. 19A Aroona Av, Unit 10N / 143 Lowanna Dr, 2A Hill St) used to
+fall through to a garbage postcode-only key, which would then
+falsely match every other letter-suffixed RP Data parcel in the
+same postcode. Re-uploading an Owner export now also cleanly
+replaces that file's prior entries instead of inflating counts.
+The Scoring settings panel adds a "Clear entire managed list"
+button as an escape hatch and shows the current stored counts.
 
 ================================================================
 WHAT'S IN THIS FOLDER

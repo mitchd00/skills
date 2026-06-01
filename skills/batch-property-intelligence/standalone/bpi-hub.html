@@ -141,7 +141,7 @@
     <h1>BATCH INTELLIGENCE HUB</h1>
     <div class="sub">Elite Lifestyle Properties — browser edition</div>
   </div>
-  <div class="sub" id="versionTag">V3.1 · 1 June 2026 · runs entirely on your machine · no data leaves the browser</div>
+  <div class="sub" id="versionTag">V3.2 · 1 June 2026 · runs entirely on your machine · no data leaves the browser</div>
 </header>
 
 <div class="wrap">
@@ -232,6 +232,8 @@
     <p class="muted" style="margin:0 0 8px;">When you upload an Owner export, the picker pre-fills the portfolio based on the file's Property Manager. Adjust here and save — changes apply on the next upload and are persisted in your OneDrive memory file.</p>
     <div id="pmMapRows"></div>
     <button id="savePmMapBtn" style="margin-top:8px;">Save PM mappings</button>
+    <button class="danger" id="clearManagedBtn" style="margin-top:8px;">Clear entire managed list</button>
+    <span class="muted" id="managedStat" style="margin-left:8px;"></span>
   </details>
 
   <div id="dashboard" style="display:none;">
@@ -710,38 +712,67 @@ const STREET_TYPES = {
   "CCT":"CIRCUIT","CIRCUIT":"CIRCUIT",
   "WY":"WAY","WAY":"WAY",
   "GR":"GROVE","GROVE":"GROVE",
-  "ESP":"ESPLANADE","ESPLANADE":"ESPLANADE"
+  "ESP":"ESPLANADE","ESPLANADE":"ESPLANADE",
+  "PWY":"PARKWAY","PKWY":"PARKWAY","PARKWAY":"PARKWAY",
+  "MWY":"MOTORWAY","MOTORWAY":"MOTORWAY",
+  "QY":"QUAY","QUAY":"QUAY",
+  "RDG":"RIDGE","RIDGE":"RIDGE"
 };
-// Build a canonical key for an address like "Unit 12 / 44 Alexandra Pde, Maroochydore QLD 4558"
-// or RP Data "12/44 ALEXANDRA PARADE" + postcode "4558".
+// Build a canonical key for an Australian address. Handles unit-numbered
+// dwellings ("12/44 Alexandra Pde"), letter suffixes ("19A Aroona Av",
+// "10N/143 Lowanna Dr") and building names between the unit and street
+// ("Unit 229 / The Palms No 4, 4 Melody Ct"). Anchors on the street-type
+// token (Avenue, Street, …) so we never produce garbage keys like
+// "<postcode> <postcode>" when the number isn't found.
 function addressKey(street, suburb, state, postcode) {
   let s = String(street || "").toUpperCase();
   if (suburb || state || postcode) {
     s = s + " " + String(suburb || "").toUpperCase() + " " + String(state || "").toUpperCase() + " " + String(postcode || "").toUpperCase();
   }
-  // Pull a 4-digit postcode if present anywhere
   const pcM = s.match(/\b(\d{4})\b/);
   const pc = pcM ? pcM[1] : "";
-  // Strip everything except digits, letters, slash and spaces. Treat punctuation as space.
-  s = s.replace(/[^A-Z0-9\/\s]/g, " ").replace(/\s+/g, " ").trim();
-  // Drop the "UNIT" word but preserve the number/slash structure: "UNIT 12 / 44" → "12/44"
+  // Keep digits, letters, slash, dash and spaces; everything else becomes a space.
+  s = s.replace(/[^A-Z0-9\/\-\s]/g, " ").replace(/\s+/g, " ").trim();
   s = s.replace(/\bUNIT\s+/g, "");
   s = s.replace(/\s*\/\s*/g, "/");
   const tokens = s.split(" ").filter(Boolean);
-  // Find the first number-or-unit-pair token (e.g. "9" or "12/44")
-  let i = 0;
-  while (i < tokens.length && !/^[\d\/]+$/.test(tokens[i])) i++;
-  if (i >= tokens.length) return "";   // no street number found, give up
-  const num = tokens[i];
-  // Street-name tokens follow the number, ending when we hit a street type or postcode/state
+  const isAuState = t => ["QLD","NSW","VIC","WA","SA","TAS","NT","ACT"].includes(t);
+  // Number-like = starts with a digit, then digits/letters/slash/dash only.
+  const isNumLike = t => /^\d[\d\w\/\-]*$/.test(t) && !isAuState(t) && t !== pc;
+  // Find the street-type token (Avenue, Street, …) — scan from the END.
+  let typeIdx = -1, typeCanon = "";
+  for (let j = tokens.length - 1; j >= 0; j--) {
+    if (STREET_TYPES[tokens[j]]) { typeIdx = j; typeCanon = STREET_TYPES[tokens[j]]; break; }
+  }
+  // End of street section = typeIdx (if found) else last non-state/postcode token.
+  let endIdx;
+  if (typeIdx !== -1) endIdx = typeIdx;
+  else {
+    endIdx = tokens.length;
+    while (endIdx > 0 && (isAuState(tokens[endIdx - 1]) || tokens[endIdx - 1] === pc)) endIdx--;
+  }
+  // Number = the nearest number-like token preceding the street-name section.
+  let numIdx = -1;
+  for (let j = endIdx - 1; j >= 0; j--) {
+    if (isNumLike(tokens[j])) { numIdx = j; break; }
+  }
+  if (numIdx === -1) return "";
+  // Optional unit: earliest leading number-like token before numIdx (handles
+  // "Unit 229 / The Palms No 4, 4 Melody Ct" → unit "229", street num "4").
+  let unit = "";
+  for (let j = 0; j < numIdx; j++) {
+    if (isNumLike(tokens[j])) {
+      const m = tokens[j].match(/^(\d+[A-Z]?)/);
+      if (m) { unit = m[1]; break; }
+    }
+  }
+  let num = tokens[numIdx];
+  if (unit && !num.includes("/")) num = `${unit}/${num}`;
+  // Street-name tokens sit between number and the end of the street section.
   const name = [];
-  let typeCanon = "";
-  for (let j = i + 1; j < tokens.length; j++) {
-    const t = tokens[j];
-    if (t === pc) break;
-    if (["QLD","NSW","VIC","WA","SA","TAS","NT","ACT"].includes(t)) break;
-    if (STREET_TYPES[t]) { typeCanon = STREET_TYPES[t]; break; }
-    name.push(t);
+  for (let j = numIdx + 1; j < endIdx; j++) {
+    if (isAuState(tokens[j]) || tokens[j] === pc) continue;
+    name.push(tokens[j]);
   }
   return `${num} ${name.join(" ")} ${typeCanon} ${pc}`.replace(/\s+/g, " ").trim();
 }
@@ -1301,6 +1332,20 @@ function showPortfolioDialog(fileName, defaultLabel, hintText) {
     can.onclick = () => done(false);
   });
 }
+// Rebuild MANAGED.byOwner from byAddressKey so re-imports never inflate counts.
+function rebuildManagedOwnerIndex() {
+  MANAGED.byOwner = {};
+  for (const entry of Object.values(MANAGED.byAddressKey)) {
+    for (const o of entry.owners || []) {
+      const k = normName(o);
+      if (!k || k === "-") continue;
+      const e = MANAGED.byOwner[k] || { portfolios: [], count: 0 };
+      if (!e.portfolios.includes(entry.portfolio)) e.portfolios.push(entry.portfolio);
+      e.count = (e.count || 0) + 1;
+      MANAGED.byOwner[k] = e;
+    }
+  }
+}
 async function ingestManaged(file) {
   try {
     const text = await file.text();
@@ -1316,17 +1361,21 @@ async function ingestManaged(file) {
       : "";
     const portfolio = await showPortfolioDialog(file.name, suggested, hint);
     if (!portfolio) { toast("Import cancelled."); return; }
-    // Remember every PM in this file → chosen portfolio. User can edit later in Settings.
     for (const p of pms) MANAGED.pmPortfolioMap[p] = portfolio;
-    const { rows, header, col } = parsed;
+    // Idempotent re-import: drop prior entries from this source first.
+    let removed = 0;
+    for (const [k, v] of Object.entries(MANAGED.byAddressKey)) {
+      if (v.source === file.name) { delete MANAGED.byAddressKey[k]; removed++; }
+    }
+    const { rows, col } = parsed;
     const at = (r, i) => (i >= 0 && i < r.length ? (r[i] || "").trim() : "");
-    let added = 0, owners = 0;
+    let added = 0, skipped = 0;
     for (let i = 1; i < rows.length; i++) {
       const r = rows[i];
       const addr = at(r, col.address);
       if (!addr) continue;
       const ak = addressKey(addr);
-      if (!ak) continue;
+      if (!ak) { skipped++; continue; }
       const rowPortfolio = at(r, col.portfolio) || portfolio;
       const ownersField = at(r, col.owner);
       const ownerList = ownersField.split(/\s*(?:,|&| and )\s*/i).map(s => s.trim()).filter(Boolean);
@@ -1340,20 +1389,14 @@ async function ingestManaged(file) {
         source: file.name
       };
       added++;
-      for (const o of ownerList) {
-        const k = normName(o);
-        if (!k || k === "-") continue;
-        const e = MANAGED.byOwner[k] || { portfolios: [], count: 0 };
-        if (!e.portfolios.includes(rowPortfolio)) e.portfolios.push(rowPortfolio);
-        e.count = (e.count || 0) + 1;
-        MANAGED.byOwner[k] = e;
-        owners++;
-      }
     }
+    rebuildManagedOwnerIndex();
     saveManaged();
     await refresh();
     await autosave();
-    toast(`Loaded ${added} managed propert${added === 1 ? "y" : "ies"} (${owners} owner link${owners === 1 ? "" : "s"}) tagged as ${portfolio}.`);
+    const note = removed ? ` (replaced ${removed} prior entries from this file)` : "";
+    const skip = skipped ? ` — ${skipped} row${skipped === 1 ? "" : "s"} had no usable address` : "";
+    toast(`Loaded ${added} managed propert${added === 1 ? "y" : "ies"} tagged as ${portfolio}${note}${skip}.`);
   } catch (e) {
     toast("Could not read Owner export: " + e.message);
   }
@@ -2138,6 +2181,8 @@ function fillSettings() {
 function renderPmMap() {
   const host = document.getElementById("pmMapRows");
   if (!host) return;
+  const statEl = document.getElementById("managedStat");
+  if (statEl) statEl.textContent = `${Object.keys(MANAGED.byAddressKey).length} addresses · ${Object.keys(MANAGED.byOwner).length} owner links currently stored.`;
   const pmsSet = new Set(Object.keys(MANAGED.pmPortfolioMap));
   for (const v of Object.values(MANAGED.byAddressKey)) if (v.propertyManager) pmsSet.add(v.propertyManager);
   const pms = Array.from(pmsSet).sort();
@@ -2163,6 +2208,17 @@ document.getElementById("savePmMapBtn").addEventListener("click", async () => {
   saveManaged();
   await autosave();
   toast("Property Manager mappings saved.");
+});
+document.getElementById("clearManagedBtn").addEventListener("click", async () => {
+  const n = Object.keys(MANAGED.byAddressKey).length;
+  if (!confirm(`Clear the entire managed list (${n} addresses + ${Object.keys(MANAGED.byOwner).length} owner links)? PM mappings will be kept. You'll need to re-upload your Owner exports.`)) return;
+  MANAGED.byAddressKey = {};
+  MANAGED.byOwner = {};
+  saveManaged();
+  await refresh();
+  await autosave();
+  renderPmMap();
+  toast(`Cleared ${n} managed entries.`);
 });
 document.getElementById("applyCfgBtn").addEventListener("click", async () => {
   CONFIG.sc_postcodes = document.getElementById("cfgPostcodes").value.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
