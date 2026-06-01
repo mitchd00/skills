@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Batch Property Intelligence — ELP Hub</title>
+<title>Batch Intelligence Hub — ELP</title>
 <style>
   :root {
     --elite-black: #0A0A0A;
@@ -60,6 +60,9 @@
   .modal select { width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
   .modal .uncertain { color: #b00020; font-weight: 700; }
   .modal-actions { margin-top: 18px; display: flex; gap: 8px; }
+  .pill-um { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #1a73e8; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .4px; white-space: nowrap; }
+  .tier-hot { display: inline-block; margin-left: 4px; padding: 1px 5px; border-radius: 3px; background: #f57c00; color: #fff; font-size: 9px; font-weight: 800; letter-spacing: .3px; }
+  .tier-flaming { display: inline-block; margin-left: 4px; padding: 1px 5px; border-radius: 3px; background: #c62828; color: #fff; font-size: 9px; font-weight: 800; letter-spacing: .3px; }
 
   .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 16px 0; }
   button {
@@ -135,10 +138,10 @@
 <body>
 <header>
   <div>
-    <h1>BATCH PROPERTY INTELLIGENCE</h1>
-    <div class="sub">Elite Lifestyle Properties — Intelligence Hub (browser edition)</div>
+    <h1>BATCH INTELLIGENCE HUB</h1>
+    <div class="sub">Elite Lifestyle Properties — browser edition</div>
   </div>
-  <div class="sub" id="versionTag">V2.1 · 27 May 2026 · runs entirely on your machine · no data leaves the browser</div>
+  <div class="sub" id="versionTag">V3.0 · 1 June 2026 · runs entirely on your machine · no data leaves the browser</div>
 </header>
 
 <div class="wrap">
@@ -160,6 +163,8 @@
   <div class="toolbar">
     <button class="primary" id="pickBtn">Pick RP Data CSV…</button>
     <button id="pickLockedonBtn">Pick LockedOn CSV…</button>
+    <button id="pickManagedBtn">Pick Managed Properties CSV…</button>
+    <input type="file" id="managedInput" hidden>
     <button id="pickEnrichBtn">Update postal/notes from sheet…</button>
     <input type="file" id="enrichInput" hidden>
     <button class="danger" id="clearBtn">Clear database</button>
@@ -179,6 +184,7 @@
     <button id="exportPortfoliosBtn">Portfolios (CSV)</button>
     <button id="exportHighBtn">High Priority (CSV)</button>
     <button id="exportWarmBtn">Warm Sellers (CSV)</button>
+    <button id="exportManagedBtn">Under Management (CSV)</button>
     <button id="exportHoldingBtn">Holding · Pending RP Data (CSV)</button>
     <button id="exportAllBtn">All Properties (CSV)</button>
   </div>
@@ -238,6 +244,7 @@
       <button class="tab" data-tab="portfolios">Portfolios <span class="count" id="cnt-portfolios"></span></button>
       <button class="tab" data-tab="rentals">Rentals <span class="count" id="cnt-rentals"></span></button>
       <button class="tab" data-tab="warm">Warm Sellers <span class="count" id="cnt-warm"></span></button>
+      <button class="tab" data-tab="managed">Under Management <span class="count" id="cnt-managed"></span></button>
       <button class="tab" data-tab="review">Review Matches <span class="count" id="cnt-review"></span></button>
       <button class="tab" data-tab="holding">Holding · Pending RP Data <span class="count" id="cnt-holding"></span></button>
       <button class="tab" data-tab="all">All Properties <span class="count" id="cnt-all"></span></button>
@@ -249,6 +256,7 @@
     <div class="panel" id="panel-portfolios"></div>
     <div class="panel" id="panel-rentals"></div>
     <div class="panel" id="panel-warm"></div>
+    <div class="panel" id="panel-managed"></div>
     <div class="panel" id="panel-review"></div>
     <div class="panel" id="panel-holding"></div>
     <div class="panel" id="panel-all"></div>
@@ -277,7 +285,7 @@
 <div class="toast" id="toast"></div>
 
 <footer>
-  Elite Lifestyle Properties · batch-property-intelligence · browser edition · All processing is local — no network, no upload.
+  Elite Lifestyle Properties · Batch Intelligence Hub · browser edition · All processing is local — no network, no upload.
 </footer>
 
 <script>
@@ -291,6 +299,8 @@ const DEFAULT_CONFIG = {
   recent_purchase_years: 5,
   enquiry_window_months: 6,
   enquiry_boost: 2,
+  managed_boost: 5,
+  score_cap: 20,
   entity_patterns: [
     "PTY LTD","PTY. LTD","LIMITED"," LTD","TRUST","SUPER","SUPERANNUATION","SMSF",
     "NOMINEES","HOLDINGS","INVESTMENTS","PROPERTIES"," GROUP"," CO."," & CO",
@@ -676,6 +686,122 @@ function applyManual(parcels) {
   }
 }
 
+/* Managed Properties (PM portfolio) — owner+address index of rentals we manage.
+   Persisted in localStorage + memory file. Highlights the names AND specific
+   parcels of properties under our management on every relevant view/export. */
+const STREET_TYPES = {
+  "AV":"AVENUE","AVE":"AVENUE","AVENUE":"AVENUE",
+  "ST":"STREET","STR":"STREET","STREET":"STREET",
+  "RD":"ROAD","ROAD":"ROAD",
+  "DR":"DRIVE","DRV":"DRIVE","DRIVE":"DRIVE",
+  "PL":"PLACE","PLACE":"PLACE",
+  "CT":"COURT","CRT":"COURT","COURT":"COURT",
+  "CR":"CRESCENT","CRES":"CRESCENT","CRESCENT":"CRESCENT",
+  "PDE":"PARADE","PARADE":"PARADE",
+  "LA":"LANE","LN":"LANE","LANE":"LANE",
+  "TCE":"TERRACE","TER":"TERRACE","TERRACE":"TERRACE",
+  "BLVD":"BOULEVARD","BVD":"BOULEVARD","BOULEVARD":"BOULEVARD",
+  "HWY":"HIGHWAY","HIGHWAY":"HIGHWAY",
+  "CL":"CLOSE","CLOSE":"CLOSE",
+  "CCT":"CIRCUIT","CIRCUIT":"CIRCUIT",
+  "WY":"WAY","WAY":"WAY",
+  "GR":"GROVE","GROVE":"GROVE",
+  "ESP":"ESPLANADE","ESPLANADE":"ESPLANADE"
+};
+// Build a canonical key for an address like "Unit 12 / 44 Alexandra Pde, Maroochydore QLD 4558"
+// or RP Data "12/44 ALEXANDRA PARADE" + postcode "4558".
+function addressKey(street, suburb, state, postcode) {
+  let s = String(street || "").toUpperCase();
+  if (suburb || state || postcode) {
+    s = s + " " + String(suburb || "").toUpperCase() + " " + String(state || "").toUpperCase() + " " + String(postcode || "").toUpperCase();
+  }
+  // Pull a 4-digit postcode if present anywhere
+  const pcM = s.match(/\b(\d{4})\b/);
+  const pc = pcM ? pcM[1] : "";
+  // Strip everything except digits, letters, slash and spaces. Treat punctuation as space.
+  s = s.replace(/[^A-Z0-9\/\s]/g, " ").replace(/\s+/g, " ").trim();
+  // Drop the "UNIT" word but preserve the number/slash structure: "UNIT 12 / 44" → "12/44"
+  s = s.replace(/\bUNIT\s+/g, "");
+  s = s.replace(/\s*\/\s*/g, "/");
+  const tokens = s.split(" ").filter(Boolean);
+  // Find the first number-or-unit-pair token (e.g. "9" or "12/44")
+  let i = 0;
+  while (i < tokens.length && !/^[\d\/]+$/.test(tokens[i])) i++;
+  if (i >= tokens.length) return "";   // no street number found, give up
+  const num = tokens[i];
+  // Street-name tokens follow the number, ending when we hit a street type or postcode/state
+  const name = [];
+  let typeCanon = "";
+  for (let j = i + 1; j < tokens.length; j++) {
+    const t = tokens[j];
+    if (t === pc) break;
+    if (["QLD","NSW","VIC","WA","SA","TAS","NT","ACT"].includes(t)) break;
+    if (STREET_TYPES[t]) { typeCanon = STREET_TYPES[t]; break; }
+    name.push(t);
+  }
+  return `${num} ${name.join(" ")} ${typeCanon} ${pc}`.replace(/\s+/g, " ").trim();
+}
+function loadManaged() {
+  try {
+    const s = JSON.parse(localStorage.getItem("bpi_managed") || "{}");
+    return { byOwner: s.byOwner || {}, byAddressKey: s.byAddressKey || {} };
+  } catch (e) { return { byOwner: {}, byAddressKey: {} }; }
+}
+function saveManaged() { localStorage.setItem("bpi_managed", JSON.stringify(MANAGED)); }
+let MANAGED = loadManaged();
+function applyManaged(parcels) {
+  for (const p of parcels) {
+    p.underManagement = false;
+    p.managedHere = false;
+    p.managedPortfolio = "";
+    p.managedPortfolios = "";
+    p.managedPropertyManager = "";
+    p.managedTenancy = "";
+    p.managedRent = "";
+    // Owner-level flag: we manage at least one of this owner's rentals.
+    const ownerEntry = MANAGED.byOwner[p.owner1];
+    if (ownerEntry) {
+      p.underManagement = true;
+      p.managedPortfolios = (ownerEntry.portfolios || []).join(", ");
+    }
+    // Parcel-level: this exact property is in the managed list.
+    const ak = addressKey(p.street, p.suburb, p.state, p.postcode);
+    if (ak) {
+      const hit = MANAGED.byAddressKey[ak];
+      if (hit) {
+        p.managedHere = true;
+        p.underManagement = true;
+        p.managedPortfolio = hit.portfolio || "";
+        p.managedPropertyManager = hit.propertyManager || "";
+        p.managedTenancy = hit.tenancy || "";
+        p.managedRent = hit.rent || "";
+      }
+    }
+  }
+}
+// Helpers for managed-boost application — invoked from applyEnquiryData area
+// at scoring time so we get the bonus on every UM parcel.
+function applyManagedBoost(parcels) {
+  const boost = CONFIG.managed_boost || 0;
+  if (!boost) return;
+  const cap = CONFIG.score_cap || 20;
+  for (const p of parcels) {
+    if (!p.underManagement || p.nonSaleable) continue;
+    const before = p.combinedScore;
+    p.combinedScore = Math.min(cap, p.combinedScore + boost);
+    p.managedBoost = p.combinedScore - before;
+    if (p.managedBoost > 0) {
+      p.recommendedAction = (p.recommendedAction || "") +
+        ` — UNDER MANAGEMENT${p.managedPortfolio ? " (" + p.managedPortfolio + ")" : ""}: already a client.`;
+    }
+  }
+}
+function tierLabel(score) {
+  if (score > 15) return "FLAMING HOT";
+  if (score > 10) return "HOT";
+  return "";
+}
+
 function buildOwnerIndex(parcels) {
   const owners = new Map();          // owner name → ordered token array (first … surname)
   for (const p of parcels) {
@@ -755,7 +881,7 @@ function applyEnquiryData(parcels, contacts) {
     if (p.inSC && !p.nonSaleable) {
       p.warmSeller = true;
       const before = p.combinedScore;
-      p.combinedScore = Math.min(10, p.combinedScore + boost);
+      p.combinedScore = Math.min(CONFIG.score_cap || 20, p.combinedScore + boost);
       p.enquiryBoost = p.combinedScore - before;
       p.recommendedAction = (p.recommendedAction || "") +
         ` — WARM SELLER: enquired (${c.enquiryDateStr || "date n/a"}) & owns an SC property; contact directly.`;
@@ -871,7 +997,10 @@ function recompute(allSales, contacts = []) {
     p.enquiryDateStr = "";
   }
   applyManual(parcels);
+  applyManaged(parcels);
   applyEnquiryData(parcels, contacts);
+  applyManagedBoost(parcels);
+  for (const p of parcels) p.tier = tierLabel(p.combinedScore);
   return parcels;
 }
 
@@ -1089,6 +1218,111 @@ async function ingestEnrichment(file) {
   }
 }
 
+// Parse an Owner Export (property-management console export) into
+// {records, header, col, method} structurally similar to csvToContacts.
+function csvToManaged(text) {
+  const rows = parseCSV(text).filter(r => r.some(c => (c || "").trim() !== ""));
+  if (!rows.length) throw new Error("Empty file.");
+  const header = rows[0].map(h => h.trim());
+  const lower = header.map(h => h.toLowerCase());
+  const findc = names => {
+    for (const n of names) { const i = lower.indexOf(n); if (i !== -1) return i; }
+    for (const n of names) { const i = lower.findIndex(h => h.includes(n)); if (i !== -1) return i; }
+    return -1;
+  };
+  const col = {
+    address: findc(["address", "property address", "rental address", "property"]),
+    owner:   findc(["ownership", "owner", "owner name", "owners", "landlord", "client"]),
+    pm:      findc(["property manager", "manager"]),
+    tenancy: findc(["tenancy", "tenant"]),
+    rent:    findc(["rent amount", "rent"]),
+    portfolio: findc(["portfolio", "category", "group"])
+  };
+  if (col.address === -1) throw new Error("Owner export needs an Address column.");
+  if (col.owner === -1) throw new Error("Owner export needs an Ownership/Owner column.");
+  return { rows, header, col };
+}
+function detectPortfolioFromName(fileName) {
+  const n = (fileName || "").toLowerCase();
+  if (/residential[ _-]?2|res[ _-]?2/.test(n)) return "Residential 2";
+  if (/residential[ _-]?1|res[ _-]?1/.test(n)) return "Residential 1";
+  if (/residential/.test(n)) return "Residential";
+  return "";
+}
+// Tiny portfolio-picker modal. Resolves to chosen label or false on cancel.
+function showPortfolioDialog(fileName, defaultLabel) {
+  return new Promise(resolve => {
+    const modal = document.getElementById("mapModal");
+    document.getElementById("mapSubtitle").innerHTML =
+      `<b>${esc(fileName)}</b> — which portfolio does this upload represent? The label is stored against every address in this file (a 'Portfolio' column inside the file, if present, will override this per row).`;
+    const opts = ["Residential", "Residential 1", "Residential 2"];
+    document.getElementById("mapRows").innerHTML = `<div class="map-row"><label>Portfolio</label><select id="pfSelect">` +
+      opts.map(o => `<option value="${o}" ${o === defaultLabel ? "selected" : ""}>${o}</option>`).join("") +
+      `</select></div>`;
+    document.querySelector(".modal h3").textContent = "Portfolio for this upload";
+    modal.classList.add("show");
+    const imp = document.getElementById("mapImport"), can = document.getElementById("mapCancel");
+    imp.textContent = "Use this portfolio";
+    const done = r => {
+      modal.classList.remove("show");
+      imp.onclick = null; can.onclick = null;
+      // Restore mapping-dialog defaults
+      document.querySelector(".modal h3").textContent = "Confirm column mapping";
+      imp.textContent = "Import with these columns";
+      resolve(r);
+    };
+    imp.onclick = () => done(document.getElementById("pfSelect").value);
+    can.onclick = () => done(false);
+  });
+}
+async function ingestManaged(file) {
+  try {
+    const text = await file.text();
+    const parsed = csvToManaged(text);
+    const suggested = detectPortfolioFromName(file.name) || "Residential";
+    const portfolio = await showPortfolioDialog(file.name, suggested);
+    if (!portfolio) { toast("Import cancelled."); return; }
+    const { rows, header, col } = parsed;
+    const at = (r, i) => (i >= 0 && i < r.length ? (r[i] || "").trim() : "");
+    let added = 0, owners = 0;
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      const addr = at(r, col.address);
+      if (!addr) continue;
+      const ak = addressKey(addr);
+      if (!ak) continue;
+      const rowPortfolio = at(r, col.portfolio) || portfolio;
+      const ownersField = at(r, col.owner);
+      const ownerList = ownersField.split(/\s*(?:,|&| and )\s*/i).map(s => s.trim()).filter(Boolean);
+      MANAGED.byAddressKey[ak] = {
+        address: addr,
+        owners: ownerList,
+        portfolio: rowPortfolio,
+        propertyManager: at(r, col.pm),
+        tenancy: at(r, col.tenancy),
+        rent: at(r, col.rent),
+        source: file.name
+      };
+      added++;
+      for (const o of ownerList) {
+        const k = normName(o);
+        if (!k || k === "-") continue;
+        const e = MANAGED.byOwner[k] || { portfolios: [], count: 0 };
+        if (!e.portfolios.includes(rowPortfolio)) e.portfolios.push(rowPortfolio);
+        e.count = (e.count || 0) + 1;
+        MANAGED.byOwner[k] = e;
+        owners++;
+      }
+    }
+    saveManaged();
+    await refresh();
+    await autosave();
+    toast(`Loaded ${added} managed propert${added === 1 ? "y" : "ies"} (${owners} owner link${owners === 1 ? "" : "s"}) tagged as ${portfolio}.`);
+  } catch (e) {
+    toast("Could not read Owner export: " + e.message);
+  }
+}
+
 async function ingestFiles(fileList) {
   // Accept whatever the user picks/drops — the parser validates it's an RP Data
   // export and reports a clear error otherwise. (Don't pre-filter on extension:
@@ -1167,19 +1401,23 @@ function renderDashboard() {
   const owners2 = new Set(saleable.filter(p => p.ownerPropertyCount >= 2).map(p => p.owner1)).size;
   const owners4 = new Set(saleable.filter(p => p.ownerPropertyCount >= 4).map(p => p.owner1)).size;
   const confirmedRentals = saleable.filter(p => p.ownerType === "Rented").length;
+  const flaming = saleable.filter(p => p.combinedScore > 15).length;
+  const hot = saleable.filter(p => p.combinedScore > 10 && p.combinedScore <= 15).length;
+  const managedRows = saleable.filter(p => p.managedHere);
   document.getElementById("statGrid").innerHTML = [
+    card(flaming, "🔥🔥 Flaming Hot (>15)"),
+    card(hot, "🔥 Hot (>10)"),
+    card(WARM.length, "Warm sellers"),
+    card(managedRows.length, "Properties under management"),
     card(DATASET.length, "Total parcels"),
-    card(high.length, "High-priority leads"),
-    card(WARM.length, "Warm sellers (enquired + own SC)"),
-    card(confirmedRentals, "Confirmed rentals"),
     card(owners2, "Multi-property owners"),
-    card(owners4, "Portfolio investors (4+)"),
   ].join("");
 
   setCount("high", high.length);
   setCount("portfolios", portfolios.length);
   setCount("rentals", rentals.length);
   setCount("warm", WARM.length);
+  setCount("managed", managedRows.length);
   setCount("review", REVIEW.length);
   setCount("holding", HOLDING.length);
   setCount("all", DATASET.length);
@@ -1202,6 +1440,7 @@ function renderDashboard() {
   document.getElementById("panel-filtered").innerHTML = filteredTable(filtered);
   document.getElementById("panel-portfolios").innerHTML = portfolioTable(portfolios);
   document.getElementById("panel-warm").innerHTML = warmTable(WARM);
+  document.getElementById("panel-managed").innerHTML = managedTable(DATASET.filter(p => p.managedHere).sort((a, b) => b.combinedScore - a.combinedScore));
   document.getElementById("panel-review").innerHTML = reviewTable(REVIEW);
   document.getElementById("panel-holding").innerHTML = holdingTable(HOLDING);
   renderAllPanel(DATASET);
@@ -1226,17 +1465,29 @@ function distTable(title, rows) {
 }
 
 function enquiryCell(p) {
+  let out = "";
   if (p.warmSeller) {
     const tag = p.recentEnquiry ? "★ WARM" : "★ warm";
-    return `<span class="grade HIGH" title="Enquired: ${esc(p.enquiryContact)} (${esc(p.enquiryDateStr || "date n/a")})">${tag} ${esc(p.enquiryDateStr || "")}</span>`;
+    out += `<span class="grade HIGH" title="Enquired: ${esc(p.enquiryContact)} (${esc(p.enquiryDateStr || "date n/a")})">${tag} ${esc(p.enquiryDateStr || "")}</span> `;
   }
-  return "";
+  if (p.underManagement) {
+    const lbl = p.managedPortfolio || p.managedPortfolios || "Managed";
+    const title = `Under our management${p.managedPropertyManager ? " — PM " + p.managedPropertyManager : ""}`;
+    out += `<span class="pill-um" title="${esc(title)}">UM · ${esc(lbl)}</span>`;
+  }
+  return out;
+}
+function tierCell(p) {
+  const t = tierLabel(p.combinedScore);
+  if (!t) return "";
+  const cls = t === "FLAMING HOT" ? "tier-flaming" : "tier-hot";
+  return `<span class="${cls}">${t}</span>`;
 }
 function leadTable(rows) {
   if (!rows.length) return `<div class="empty">No matching properties.</div>`;
   const body = rows.map(p => `
-    <tr class="s${p.combinedScore}">
-      <td class="score">${p.combinedScore}</td>
+    <tr class="s${Math.min(p.combinedScore, 10)}">
+      <td class="score">${p.combinedScore} ${tierCell(p)}</td>
       <td>${gradeSpan(p.sellerLead)}</td>
       <td>${gradeSpan(p.rentalLead)}</td>
       <td>${enquiryCell(p)}</td>
@@ -1250,7 +1501,27 @@ function leadTable(rows) {
       <td>${esc(p.recommendedAction)}</td>
     </tr>`).join("");
   return `<div class="table-scroll"><table>
-    <thead><tr><th>Score</th><th>Seller</th><th>Rental</th><th>Enquiry</th><th>Address</th><th>Suburb</th><th>Owner</th><th>Class</th><th>Props</th><th>Rentals</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
+    <thead><tr><th>Score</th><th>Seller</th><th>Rental</th><th>Status</th><th>Address</th><th>Suburb</th><th>Owner</th><th>Class</th><th>Props</th><th>Rentals</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+}
+function managedTable(rows) {
+  if (!rows.length) return `<div class="empty">No managed properties matched yet. Upload your Owner / Properties-Under-Management CSV (see "Pick Managed Properties CSV…"). The tool flags every owner you manage on every row they appear on, and links the specific parcels when the address matches.</div>`;
+  const body = rows.map(p => `
+    <tr class="s${Math.min(p.combinedScore, 10)}">
+      <td class="score">${p.combinedScore} ${tierCell(p)}</td>
+      <td>${enquiryCell(p)}</td>
+      <td>${esc(p.owner1)}</td>
+      <td>${esc(p.fullAddress)}</td>
+      <td>${esc(p.suburbName)}</td>
+      <td>${esc(p.managedPortfolio)}</td>
+      <td>${esc(p.managedPropertyManager)}</td>
+      <td>${esc(p.managedTenancy)}</td>
+      <td>${esc(p.managedRent)}</td>
+      <td>${esc(p.recommendedAction)}</td>
+    </tr>`).join("");
+  return `<div class="filterbar"><span class="muted">Properties we currently manage that also appear in the RP Data ownership database. The owner-level UM badge shows everywhere these owners appear on the dashboard.</span></div>
+    <div class="table-scroll"><table>
+    <thead><tr><th>Score</th><th>Status</th><th>Owner</th><th>Address</th><th>Suburb</th><th>Portfolio</th><th>Property Manager</th><th>Tenancy</th><th>Rent</th><th>Recommended Action</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 function warmTable(rows) {
@@ -1393,13 +1664,14 @@ function csvCell(v) {
 }
 
 const EXPORT_COLS = [
-  ["combinedScore","Combined Lead Score"],["sellerLead","Seller Lead"],["rentalLead","Rental Lead"],
+  ["combinedScore","Combined Lead Score"],["tier","Tier"],["sellerLead","Seller Lead"],["rentalLead","Rental Lead"],
   ["knownToOffice","Known to Office"],["recentEnquiry","Recent Enquiry"],["enquiryContact","Enquiry Contact"],
   ["enquiryDateStr","Enquiry Date"],["recommendedAction","Recommended Action"],
   ["fullAddress","Address"],["suburbName","Suburb"],["propertyType","Property Type"],
   ["bed","Bed"],["bath","Bath"],["car","Car"],["landSize","Land Size m2"],["yearBuilt","Year Built"],
   ["owner1","Owner 1"],["ownerClass","Owner Class"],["ownerType","Owner Type"],["jointOwner","Joint Owner"],
   ["owner2","Owner 2"],["postalAddress","Postal Address"],["ownerNotes","Notes"],
+  ["underManagement","Under Management"],["managedPortfolio","Managed Portfolio"],
   ["ownerPropertyCount","Owner Property Count"],["ownerRentalCount","Owner Rental Count"],
   ["ownerProperties","Owner Properties"],["ownerRentals","Owner Rentals"],["portfolioInvestor","Portfolio Investor"],
   ["saleDateStr","Sale Date"],["salePrice","Sale Price"],["yearsSinceSale","Years Since Sale"],
@@ -1407,15 +1679,25 @@ const EXPORT_COLS = [
   ["parcelDetails","Parcel Details"],["openInRpData","Open in RPData"]
 ];
 const WARM_COLS = [
-  ["combinedScore","Score"],["enquiryContact","Enquirer (LockedOn)"],["enquiryDateStr","Enquiry Date"],
+  ["combinedScore","Score"],["tier","Tier"],["enquiryContact","Enquirer (LockedOn)"],["enquiryDateStr","Enquiry Date"],
   ["owner1","Owner (database)"],["fullAddress","SC Property Owned"],["suburbName","Suburb"],
-  ["postalAddress","Postal Address"],["ownerNotes","Notes"],["ownerPropertyCount","Properties Owned"],
+  ["postalAddress","Postal Address"],["ownerNotes","Notes"],
+  ["underManagement","Under Management"],["managedPortfolio","Managed Portfolio"],
+  ["ownerPropertyCount","Properties Owned"],
   ["sellerLead","Seller Lead"],["ownerType","Owner Type"],["recommendedAction","Recommended Action"]
 ];
 const HOLDING_COLS = [
   ["name","Name"],["interest","Property Enquired On"],["email","Email"],["phone","Phone"],
   ["enquiryDateStr","Enquiry Date"],["contactType","Enquiry Type"],["source","Source File"],
   ["rpDataOwner","RP Data Owner (fill after search)"],["rpDataResult","Owns SC property? (Y/N)"]
+];
+const MANAGED_COLS = [
+  ["combinedScore","Score"],["tier","Tier"],["owner1","Owner"],
+  ["fullAddress","Address"],["suburbName","Suburb"],
+  ["managedPortfolio","Portfolio"],["managedPropertyManager","Property Manager"],
+  ["managedTenancy","Tenancy"],["managedRent","Rent"],
+  ["postalAddress","Postal Address"],["sellerLead","Seller Lead"],
+  ["ownerType","Owner Type"],["recommendedAction","Recommended Action"]
 ];
 // Portfolio rows have a variable number of properties, so columns are built
 // dynamically: one "SC Property N" column per holding (widest owner sets N),
@@ -1525,6 +1807,7 @@ const exportPortfolios = () => exportMatrix(portfoliosInSuburb(subsetPortfolios(
 const exportHigh       = () => exportCSV(parcelsInSuburb(subsetHigh()), EXPORT_COLS, "high-priority leads", "HighPriority");
 const exportAll        = () => exportCSV(parcelsInSuburb(subsetAll()), EXPORT_COLS, "parcels", "AllProperties");
 const exportWarm       = () => exportCSV(parcelsInSuburb(WARM), WARM_COLS, "warm sellers", "WarmSellers");
+const exportManaged    = () => exportCSV(parcelsInSuburb(DATASET.filter(p => p.managedHere).sort((a, b) => b.combinedScore - a.combinedScore)), MANAGED_COLS, "managed properties", "UnderManagement");
 const exportHolding    = () => exportCSV(holdingInSuburb(HOLDING), HOLDING_COLS, "holding enquirers", "Holding_PendingRPData");
 
 /* ── minimal in-browser .xlsx writer (zip of XML, store method) ── */
@@ -1672,6 +1955,10 @@ function buildSummarySheet() {
     ["Confirmed rentals", saleable.filter(p => p.ownerType === "Rented").length],
     ["Warm sellers (enquired + own current SC property)", WARM.length],
     ["  of which enquired recently", WARM.filter(p => p.recentEnquiry).length],
+    ["Properties under management", saleable.filter(p => p.managedHere).length],
+    ["  warm sellers ALSO under management", saleable.filter(p => p.warmSeller && p.underManagement).length],
+    ["🔥 Hot leads (score > 10)", saleable.filter(p => p.combinedScore > 10 && p.combinedScore <= 15).length],
+    ["🔥🔥 Flaming Hot leads (score > 15)", saleable.filter(p => p.combinedScore > 15).length],
     ["Holding — enquirers pending RP Data lookup", HOLDING.length],
     ["Generated", new Date().toLocaleString("en-AU")]
   ];
@@ -1682,6 +1969,7 @@ function exportWorkbook() {
   const sheets = [
     buildSummarySheet(),
     sheetFrom("Warm Sellers", parcelsInSuburb(WARM), WARM_COLS),
+    sheetFrom("Under Management", parcelsInSuburb(DATASET.filter(p => p.managedHere).sort((a, b) => b.combinedScore - a.combinedScore)), MANAGED_COLS),
     sheetFrom("High Priority", parcelsInSuburb(subsetHigh()), EXPORT_COLS),
     sheetFrom("Seller Leads", parcelsInSuburb(subsetSeller()), EXPORT_COLS),
     (() => { const rm = rentalsMatrix(landlordsInSuburb(subsetRentalLandlords())); return { name: "Rentals", header: rm.header, rows: rm.data.map(r => r.map(cellValue)) }; })(),
@@ -1693,7 +1981,7 @@ function exportWorkbook() {
   const bytes = buildXlsx(sheets);
   downloadBlob(bytes, `BPI_Master_Dashboard${subSuffix()}_${stamp()}.xlsx`,
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  toast(`Exported workbook (9 tabs)${subLabel()} to Excel.`);
+  toast(`Exported workbook (10 tabs)${subLabel()} to Excel.`);
 }
 
 /* ───────────────────────── UI wiring ───────────────────────── */
@@ -1720,6 +2008,8 @@ document.getElementById("pickBtn").addEventListener("click", () => document.getE
 document.getElementById("pickLockedonBtn").addEventListener("click", () => document.getElementById("lockedonInput").click());
 document.getElementById("pickEnrichBtn").addEventListener("click", () => document.getElementById("enrichInput").click());
 document.getElementById("enrichInput").addEventListener("change", e => { if (e.target.files[0]) ingestEnrichment(e.target.files[0]); e.target.value = ""; });
+document.getElementById("pickManagedBtn").addEventListener("click", () => document.getElementById("managedInput").click());
+document.getElementById("managedInput").addEventListener("change", e => { if (e.target.files[0]) ingestManaged(e.target.files[0]); e.target.value = ""; });
 
 document.getElementById("clearBtn").addEventListener("click", async () => {
   if (confirm("Clear the entire local database? This removes every RP Data CSV and LockedOn contact you've ingested.")) {
@@ -1732,6 +2022,7 @@ document.getElementById("exportRentalsBtn").addEventListener("click", exportRent
 document.getElementById("exportPortfoliosBtn").addEventListener("click", exportPortfolios);
 document.getElementById("exportHighBtn").addEventListener("click", exportHigh);
 document.getElementById("exportWarmBtn").addEventListener("click", exportWarm);
+document.getElementById("exportManagedBtn").addEventListener("click", exportManaged);
 document.getElementById("exportHoldingBtn").addEventListener("click", exportHolding);
 document.getElementById("exportAllBtn").addEventListener("click", exportAll);
 
@@ -1853,11 +2144,12 @@ async function buildPayload() {
   const contacts = await getAllContacts();
   const runs = await getRuns();
   return JSON.stringify({
-    app: "bpi", version: 4, exportedAt: new Date().toISOString(),
+    app: "bpi", version: 5, exportedAt: new Date().toISOString(),
     sales, contacts, runs,
     config: CONFIG,
     decisions: { approved: [...DECISIONS.approved], rejected: [...DECISIONS.rejected] },
-    manual: MANUAL
+    manual: MANUAL,
+    managed: MANAGED
   });
 }
 async function writeDBFile(handle) {
@@ -1868,15 +2160,16 @@ async function writeDBFile(handle) {
 async function readDBFile(handle) {
   const file = await handle.getFile();
   const text = await file.text();
-  if (!text.trim()) return { sales: [], contacts: [], runs: { count: 0, files: [] }, config: null, decisions: null, manual: null };
+  if (!text.trim()) return { sales: [], contacts: [], runs: { count: 0, files: [] }, config: null, decisions: null, manual: null, managed: null };
   const data = JSON.parse(text);
   return {
     sales: data.sales || [], contacts: data.contacts || [], runs: data.runs || { count: 0, files: [] },
-    config: data.config || null, decisions: data.decisions || null, manual: data.manual || null
+    config: data.config || null, decisions: data.decisions || null,
+    manual: data.manual || null, managed: data.managed || null
   };
 }
-// Apply config + match decisions + manual enrichment loaded from the memory file.
-function applyLoadedExtras(config, decisions, manual) {
+// Apply config + match decisions + manual enrichment + managed list loaded from memory.
+function applyLoadedExtras(config, decisions, manual, managed) {
   if (decisions) {
     DECISIONS = { approved: new Set(decisions.approved || []), rejected: new Set(decisions.rejected || []) };
     saveDecisions();
@@ -1884,6 +2177,10 @@ function applyLoadedExtras(config, decisions, manual) {
   if (manual) {
     MANUAL = { postalByOwner: manual.postalByOwner || {}, notesByOwner: manual.notesByOwner || {} };
     saveManual();
+  }
+  if (managed) {
+    MANAGED = { byOwner: managed.byOwner || {}, byAddressKey: managed.byAddressKey || {} };
+    saveManaged();
   }
   if (config) {
     CONFIG = Object.assign({}, DEFAULT_CONFIG, config);
@@ -1976,8 +2273,8 @@ async function reconnect() {
 }
 async function loadFromHandle(h) {
   try {
-    const { sales, contacts, runs, config, decisions, manual } = await readDBFile(h);
-    applyLoadedExtras(config, decisions, manual);
+    const { sales, contacts, runs, config, decisions, manual, managed } = await readDBFile(h);
+    applyLoadedExtras(config, decisions, manual, managed);
     await replaceAll(sales, contacts, runs);
     await refresh();
   } catch (e) {
@@ -2018,7 +2315,7 @@ function loadCopy() { document.getElementById("loadCopyInput").click(); }
 async function loadCopyFile(file) {
   try {
     const data = JSON.parse(await file.text());
-    applyLoadedExtras(data.config || null, data.decisions || null, data.manual || null);
+    applyLoadedExtras(data.config || null, data.decisions || null, data.manual || null, data.managed || null);
     await replaceAll(data.sales || [], data.contacts || [], data.runs || { count: 0, files: [] });
     await refresh();
     await autosave();

@@ -1,1 +1,1 @@
-{"app":"bpi","version":4,"exportedAt":null,"sales":[],"contacts":[],"runs":{"count":0,"files":[]},"config":null,"decisions":{"approved":[],"rejected":[]},"manual":{"postalByOwner":{},"notesByOwner":{}}}
+{"app":"bpi","version":5,"exportedAt":null,"sales":[],"contacts":[],"runs":{"count":0,"files":[]},"config":null,"decisions":{"approved":[],"rejected":[]},"manual":{"postalByOwner":{},"notesByOwner":{}},"managed":{"byOwner":{},"byAddressKey":{}}}

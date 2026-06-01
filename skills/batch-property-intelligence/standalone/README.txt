@@ -1,4 +1,4 @@
-BATCH PROPERTY INTELLIGENCE — Browser Edition
+BATCH INTELLIGENCE HUB — Browser Edition  (V3.0)
 Elite Lifestyle Properties
 
 ================================================================
@@ -48,8 +48,57 @@ DAILY USE
   - Drop the same file twice? No problem — it de-duplicates.
 
   - Tabs: Summary, High Priority, Warm Sellers,
-    Holding (Pending RP Data), Portfolios, Rentals,
-    All Properties, Filtered Out.
+    Under Management, Holding (Pending RP Data),
+    Portfolios, Rentals, All Properties, Filtered Out.
+
+================================================================
+UNDER MANAGEMENT  (Properties we already manage)
+================================================================
+
+  - Drop your Owner Export (a CSV from the property-management
+    console, with Address + Ownership columns) via the
+    "Pick Managed Properties CSV..." button.
+
+  - On upload a small dialog asks which portfolio it represents
+    (Residential / Residential 1 / Residential 2). It's auto-
+    suggested from the filename; override with the dropdown.
+    If the CSV itself has a Portfolio column, that value wins
+    per row.
+
+  - The tool builds two indexes from the file:
+      • PER-OWNER  — every owner name is flagged "under
+        management". Wherever that owner appears across the
+        dashboard (Warm Sellers, leads tables, Portfolios,
+        search results) they show a blue UM badge so you can
+        instantly see we already have the relationship.
+      • PER-PROPERTY  — addresses are normalised (Av → Avenue,
+        units like "12/44 Alexandra Pde" handled) and matched
+        against the RP Data parcels. The Under Management tab
+        lists every parcel match with portfolio, property
+        manager, current tenancy and rent.
+
+  - Combined Score gets a +5 boost on every parcel under
+    management (stackable with the warm-seller +2).
+
+  - Re-uploads MERGE; entries are updated but never wiped, so
+    your manual postal/notes and prior portfolio assignments
+    survive future Owner exports.
+
+================================================================
+SCORE TIERS  (1–20 with HOT / FLAMING HOT)
+================================================================
+
+  Combined Score now runs 1–20 (was 1–10). Two new tiers:
+
+      🔥 HOT          score > 10
+      🔥🔥 FLAMING HOT  score > 15
+
+  Boosts (stackable, capped at 20):
+      Warm seller (LockedOn match + own SC property)  +2
+      Under our management                            +5
+
+  A warm seller you also manage on a max-base (10) parcel
+  reaches 17 — FLAMING HOT — the strongest possible signal.
 
 ================================================================
 ENQUIRY DATA  (LockedOn  OR  RP Data enquiries)
