@@ -203,7 +203,7 @@
     <h1>BATCH INTELLIGENCE HUB</h1>
     <div class="sub">Elite Lifestyle Properties — browser edition</div>
   </div>
-  <div class="sub" id="versionTag">V3.8 · 1 June 2026 · runs entirely on your machine · no data leaves the browser</div>
+  <div class="sub" id="versionTag">V3.9 · 1 June 2026 · runs entirely on your machine · no data leaves the browser</div>
 </header>
 
 <div class="wrap">
@@ -893,6 +893,26 @@ function applyManaged(parcels) {
 }
 // Helpers for managed-boost application — invoked from applyEnquiryData area
 // at scoring time so we get the bonus on every UM parcel.
+// Repeat-enquirer boost — same person has enquired several times = hotter lead.
+function applyRepeatEnquiryBoost(parcels) {
+  const cap = CONFIG.score_cap || 20;
+  for (const p of parcels) {
+    if (!p.warmSeller || p.nonSaleable) continue;
+    const cnt = p.enquiryCount || 1;
+    let extra = 0;
+    if (cnt >= 6) extra = 2;
+    else if (cnt >= 3) extra = 1;
+    if (extra > 0) {
+      const before = p.combinedScore;
+      p.combinedScore = Math.min(cap, p.combinedScore + extra);
+      p.repeatBoost = p.combinedScore - before;
+      if (p.repeatBoost > 0) {
+        p.recommendedAction = (p.recommendedAction || "") +
+          ` — repeat enquirer (${cnt}×).`;
+      }
+    }
+  }
+}
 function applyManagedBoost(parcels) {
   const boost = CONFIG.managed_boost || 0;
   if (!boost) return;
@@ -1148,7 +1168,9 @@ function computeWarmSellers(parcels) {
     if (!cur || p.combinedScore > cur.combinedScore) seen.set(p.owner1, p);
   }
   return Array.from(seen.values()).sort((a, b) =>
-    (b.recentEnquiry - a.recentEnquiry) || (b.combinedScore - a.combinedScore));
+    (b.combinedScore - a.combinedScore) ||
+    ((b.enquiryCount || 1) - (a.enquiryCount || 1)) ||
+    (b.recentEnquiry - a.recentEnquiry));
 }
 // Holding spot — enquirers with NO candidate owner in the database at all.
 // They need an RP Data lookup. Deduped per person, most recent enquiry first.
@@ -1244,6 +1266,7 @@ function recompute(allSales, contacts = []) {
   applyInterestPrices(parcels, contacts);
   applyEnquiryData(parcels, contacts);
   applyManagedBoost(parcels);
+  applyRepeatEnquiryBoost(parcels);
   for (const p of parcels) p.tier = tierLabel(p.combinedScore);
   return parcels;
 }
