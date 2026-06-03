@@ -1,11 +1,20 @@
-BATCH INTELLIGENCE HUB — Browser Edition  (V3.7)
+BATCH INTELLIGENCE HUB — Browser Edition  (V3.9)
 Elite Lifestyle Properties
 
-V3.7 — Each enquirer now carries an "Enq #" count showing how
-many separate enquiries they've made across all loaded files.
-Anyone with ≥2 enquiries gets an orange "🔁 N×" badge next to
-their name in Holding and Warm Sellers — repeat enquirers are
-hotter leads worth prioritising. The count is also a sortable
+V3.9 — Repeat enquirers now move the Combined Score: a warm
+seller whose matched enquirer has 3-5 enquiries gets +1, ≥6
+gets +2 (stackable with warm +2 and managed +5, capped at 20).
+The Recommended Action also notes "— repeat enquirer (N×)."
+Warm Sellers re-sorts within each score by enquiry count.
+
+V3.8 — Holding now opens sorted by enquiry count (highest first)
+so the most-engaged people sit at the top, plus dashboard stat
+cards for "Unique enquirers" and "🔁 Repeat enquirers (≥2)".
+
+V3.7 — Each enquirer carries an "Enq #" count showing how many
+separate enquiries they've made across all loaded files. Anyone
+with ≥2 enquiries gets an orange "🔁 N×" badge next to their
+name in Holding and Warm Sellers. The count is a sortable
 column in both views and is included in CSV / workbook exports.
 
 V3.6 — DNC enquirers (do-not-contact / do-not-call / do-not-email
