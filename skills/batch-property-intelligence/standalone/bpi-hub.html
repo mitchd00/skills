@@ -550,12 +550,12 @@ function titleCase(s) {
 const LO_FIELDS = {
   first:   ["first name", "firstname", "given name", "given"],
   last:    ["last name", "lastname", "surname", "family name"],
-  name:    ["contact name", "full name", "name", "contact", "client", "lead name"],
-  email:   ["email", "e-mail"],
-  phone:   ["mobile", "phone", "telephone", "contact number"],
-  date:    ["enquiry date", "date of enquiry", "received at", "received date", "received", "created", "date added", "added", "last activity", "last contact", "date"],
-  interest:["listing address", "property", "address", "interest", "enquiry", "enquired about", "listing", "notes", "comment"],
-  type:    ["enquiry type", "contact type", "type", "category", "status", "source"]
+  name:    ["client-display-name", "client display name", "client name", "contact name", "full name", "name", "contact", "client", "lead name"],
+  email:   ["emails", "email", "e-mail"],
+  phone:   ["phone-numbers", "mobile", "phone", "telephone", "contact number"],
+  date:    ["enquiry-date", "enquiry date", "date of enquiry", "received at", "received date", "received", "created", "date added", "added", "last activity", "last contact", "date"],
+  interest:["property-display-address", "listing address", "property address", "property", "address", "interest", "enquiry", "enquired about", "listing", "notes", "comment"],
+  type:    ["lead-source", "enquiry type", "contact type", "type", "category", "status", "source"]
 };
 // Returns {idx, method} where method is "exact" | "fuzzy" | "none".
 function findColDetailed(header, synonyms) {
@@ -894,6 +894,89 @@ function tierLabel(score) {
   return "";
 }
 
+/* Price helpers — tag each enquiry with the price of the property enquired on. */
+function priceBracket(p) {
+  if (!p || p < 1) return "";
+  if (p < 500000)  return "<$500k";
+  if (p < 1000000) return "$500k–$1M";
+  if (p < 2000000) return "$1M–$2M";
+  if (p < 5000000) return "$2M–$5M";
+  return "$5M+";
+}
+function fmtPrice(p) {
+  if (!p || p < 1) return "";
+  if (p >= 1000000) return "$" + (p / 1000000).toFixed(p >= 10000000 ? 0 : 2).replace(/\.?0+$/, "") + "M";
+  return "$" + Math.round(p / 1000) + "k";
+}
+// Suburb-anchored address key — for matching enquiry "property-display-address"
+// (which has suburb but rarely a postcode) against RP Data parcels.
+function addressKeyForMatching(addrStr) {
+  let s = String(addrStr || "").toUpperCase();
+  s = s.replace(/[^A-Z0-9\/\-\s,]/g, " ").replace(/\s+/g, " ").trim();
+  s = s.replace(/\bUNIT\s+/g, "");
+  s = s.replace(/\s*\/\s*/g, "/");
+  const lastComma = s.lastIndexOf(",");
+  let streetPart = s, suburbPart = "";
+  if (lastComma !== -1) {
+    streetPart = s.slice(0, lastComma).trim();
+    suburbPart = s.slice(lastComma + 1).trim();
+  }
+  suburbPart = suburbPart
+    .replace(/\b(QLD|NSW|VIC|WA|SA|TAS|NT|ACT)\b/g, "")
+    .replace(/\b\d{4}\b/g, "")
+    .replace(/\s+/g, " ").trim();
+  const tokens = streetPart.split(/\s+/).filter(Boolean);
+  const isAuState = t => ["QLD","NSW","VIC","WA","SA","TAS","NT","ACT"].includes(t);
+  const isNumLike = t => /^\d[\d\w\/\-]*$/.test(t) && !isAuState(t);
+  let typeIdx = -1, typeCanon = "";
+  for (let j = tokens.length - 1; j >= 0; j--) {
+    if (STREET_TYPES[tokens[j]]) { typeIdx = j; typeCanon = STREET_TYPES[tokens[j]]; break; }
+  }
+  const endIdx = typeIdx === -1 ? tokens.length : typeIdx;
+  let numIdx = -1;
+  for (let j = endIdx - 1; j >= 0; j--) {
+    if (isNumLike(tokens[j])) { numIdx = j; break; }
+  }
+  if (numIdx === -1) return "";
+  let unit = "";
+  for (let j = 0; j < numIdx; j++) {
+    if (isNumLike(tokens[j])) {
+      const m = tokens[j].match(/^(\d+[A-Z]?)/);
+      if (m) { unit = m[1]; break; }
+    }
+  }
+  let num = tokens[numIdx];
+  if (unit && !num.includes("/")) num = `${unit}/${num}`;
+  const name = [];
+  for (let j = numIdx + 1; j < endIdx; j++) name.push(tokens[j]);
+  return `${num} ${name.join(" ")} ${typeCanon} ${suburbPart}`.replace(/\s+/g, " ").trim();
+}
+// Look up each contact's enquired property in the RP Data parcels and tag
+// interestPrice + interestPriceBracket. Latest sale per parcel wins.
+function applyInterestPrices(parcels, contacts) {
+  if (!contacts || !contacts.length) return;
+  const priceMap = new Map();
+  for (const p of parcels) {
+    if (!p.salePrice || p.salePrice < 1) continue;
+    const k = addressKeyForMatching(p.fullAddress);
+    if (!k) continue;
+    const prev = priceMap.get(k);
+    if (!prev || (p.saleDateMs || 0) > (prev.ms || 0)) {
+      priceMap.set(k, { price: p.salePrice, ms: p.saleDateMs || 0 });
+    }
+  }
+  for (const c of contacts) {
+    c.interestPrice = null;
+    c.interestPriceBracket = "";
+    if (!c.interest) continue;
+    const k = addressKeyForMatching(c.interest);
+    if (k && priceMap.has(k)) {
+      c.interestPrice = priceMap.get(k).price;
+      c.interestPriceBracket = priceBracket(c.interestPrice);
+    }
+  }
+}
+
 function buildOwnerIndex(parcels) {
   const owners = new Map();          // owner name → ordered token array (first … surname)
   for (const p of parcels) {
@@ -969,6 +1052,9 @@ function applyEnquiryData(parcels, contacts) {
     p.enquiryContact = c.name;
     p.enquiryDateStr = c.enquiryDateStr || "";
     p.enquiryDateMs = c.enquiryDateMs;
+    p.enquiryInterest = c.interest || "";
+    p.enquiryInterestPrice = c.interestPrice || null;
+    p.enquiryInterestBracket = c.interestPriceBracket || "";
     p.recentEnquiry = c.enquiryDateMs ? (now - c.enquiryDateMs) <= windowMs : false;
     if (p.inSC && !p.nonSaleable) {
       p.warmSeller = true;
@@ -1090,6 +1176,7 @@ function recompute(allSales, contacts = []) {
   }
   applyManual(parcels);
   applyManaged(parcels);
+  applyInterestPrices(parcels, contacts);
   applyEnquiryData(parcels, contacts);
   applyManagedBoost(parcels);
   for (const p of parcels) p.tier = tierLabel(p.combinedScore);
@@ -1667,6 +1754,9 @@ function warmTable(rows) {
       <td class="score">${p.combinedScore}</td>
       <td>${enquiryCell(p)}</td>
       <td>${esc(p.enquiryContact)}</td>
+      <td>${esc(p.enquiryInterest)}</td>
+      <td>${esc(p.enquiryInterestBracket)}</td>
+      <td>${esc(fmtPrice(p.enquiryInterestPrice))}</td>
       <td>${esc(p.owner1)}</td>
       <td>${esc(p.fullAddress)}</td>
       <td>${esc(p.suburbName)}</td>
@@ -1676,7 +1766,7 @@ function warmTable(rows) {
       <td>${esc(p.recommendedAction)}</td>
     </tr>`).join("");
   return `<div class="table-scroll"><table>
-    <thead><tr><th>Score</th><th>Warm</th><th>Enquirer (LockedOn)</th><th>Owner (database)</th><th>SC Property Owned</th><th>Suburb</th><th>Props</th><th>Seller</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
+    <thead><tr><th>Score</th><th>Warm</th><th>Enquirer</th><th>Enquired On</th><th>Bracket</th><th>Price</th><th>Owner (database)</th><th>SC Property Owned</th><th>Suburb</th><th>Props</th><th>Seller</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 function reviewTable(rows) {
@@ -1816,6 +1906,7 @@ const EXPORT_COLS = [
 ];
 const WARM_COLS = [
   ["combinedScore","Score"],["tier","Tier"],["enquiryContact","Enquirer (LockedOn)"],["enquiryDateStr","Enquiry Date"],
+  ["enquiryInterest","Enquired On"],["enquiryInterestBracket","Enquired Bracket"],["enquiryInterestPrice","Enquired Price"],
   ["owner1","Owner (database)"],["fullAddress","SC Property Owned"],["suburbName","Suburb"],
   ["postalAddress","Postal Address"],["ownerNotes","Notes"],
   ["underManagement","Under Management"],["managedPortfolio","Managed Portfolio"],
@@ -1823,7 +1914,9 @@ const WARM_COLS = [
   ["sellerLead","Seller Lead"],["ownerType","Owner Type"],["recommendedAction","Recommended Action"]
 ];
 const HOLDING_COLS = [
-  ["name","Name"],["interest","Property Enquired On"],["email","Email"],["phone","Phone"],
+  ["name","Name"],["interest","Property Enquired On"],
+  ["interestPriceBracket","Enquired Bracket"],["interestPrice","Enquired Price"],
+  ["email","Email"],["phone","Phone"],
   ["enquiryDateStr","Enquiry Date"],["contactType","Enquiry Type"],["source","Source File"],
   ["rpDataOwner","RP Data Owner (fill after search)"],["rpDataResult","Owns SC property? (Y/N)"]
 ];
