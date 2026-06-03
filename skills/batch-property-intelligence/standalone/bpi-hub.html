@@ -61,6 +61,7 @@
   .modal .uncertain { color: #b00020; font-weight: 700; }
   .modal-actions { margin-top: 18px; display: flex; gap: 8px; }
   .pill-um { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #1a73e8; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .4px; white-space: nowrap; }
+  .pill-inv { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #2e7d32; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .4px; white-space: nowrap; }
   .tier-hot { display: inline-block; margin-left: 4px; padding: 1px 5px; border-radius: 3px; background: #f57c00; color: #fff; font-size: 9px; font-weight: 800; letter-spacing: .3px; }
   .tier-flaming { display: inline-block; margin-left: 4px; padding: 1px 5px; border-radius: 3px; background: #c62828; color: #fff; font-size: 9px; font-weight: 800; letter-spacing: .3px; }
 
@@ -198,7 +199,7 @@
     <h1>BATCH INTELLIGENCE HUB</h1>
     <div class="sub">Elite Lifestyle Properties — browser edition</div>
   </div>
-  <div class="sub" id="versionTag">V3.4 · 1 June 2026 · runs entirely on your machine · no data leaves the browser</div>
+  <div class="sub" id="versionTag">V3.5 · 1 June 2026 · runs entirely on your machine · no data leaves the browser</div>
 </header>
 
 <div class="wrap">
@@ -555,7 +556,12 @@ const LO_FIELDS = {
   phone:   ["phone-numbers", "mobile", "phone", "telephone", "contact number"],
   date:    ["enquiry-date", "enquiry date", "date of enquiry", "received at", "received date", "received", "created", "date added", "added", "last activity", "last contact", "date"],
   interest:["property-display-address", "listing address", "property address", "property", "address", "interest", "enquiry", "enquired about", "listing", "notes", "comment"],
-  type:    ["lead-source", "enquiry type", "contact type", "type", "category", "status", "source"]
+  type:    ["lead-source", "enquiry type", "contact type", "type", "category", "status", "source"],
+  activeBuyer: ["active-buyer", "active buyer"],
+  dnc:     ["donotcontact", "do not contact", "do-not-contact", "dnc"],
+  dnCall:  ["donotcall", "do not call", "do-not-call"],
+  dnEmail: ["donotemail", "do not email", "do-not-email"],
+  notesCol:["notes", "comments", "comment"]
 };
 // Returns {idx, method} where method is "exact" | "fuzzy" | "none".
 function findColDetailed(header, synonyms) {
@@ -598,6 +604,7 @@ function parseAnyDate(s) {
 
 function parseContactRows(rows, col, sourceName) {
   const at = (r, i) => (i >= 0 && i < r.length ? (r[i] || "").trim() : "");
+  const truthy = v => /^(true|yes|y|1)$/i.test((v || "").trim());
   const records = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
@@ -606,6 +613,9 @@ function parseContactRows(rows, col, sourceName) {
     if (!name) continue;
     const dateRaw = at(r, col.date);
     const d = parseAnyDate(dateRaw);
+    const notesText = at(r, col.notesCol);
+    // Investor scan — flag the contact if any of these terms appear in notes/comments.
+    const investorRe = /\b(invest|investor|investing|investment|rental yield|IP\b|buy to rent|buy-to-rent)\b/i;
     const rec = {
       name,
       email: at(r, col.email),
@@ -614,6 +624,12 @@ function parseContactRows(rows, col, sourceName) {
       enquiryDateStr: dateRaw,
       interest: at(r, col.interest),
       contactType: at(r, col.type),
+      activeBuyer: col.activeBuyer >= 0 ? truthy(at(r, col.activeBuyer)) : null,
+      doNotContact: col.dnc >= 0 ? truthy(at(r, col.dnc)) : null,
+      doNotCall: col.dnCall >= 0 ? truthy(at(r, col.dnCall)) : null,
+      doNotEmail: col.dnEmail >= 0 ? truthy(at(r, col.dnEmail)) : null,
+      notes: notesText,
+      potentialInvestor: investorRe.test(notesText),
       source: sourceName,
       tokens: Array.from(nameTokens(name))
     };
@@ -968,11 +984,13 @@ function applyInterestPrices(parcels, contacts) {
   for (const c of contacts) {
     c.interestPrice = null;
     c.interestPriceBracket = "";
+    c.interestPriceFmt = "";
     if (!c.interest) continue;
     const k = addressKeyForMatching(c.interest);
     if (k && priceMap.has(k)) {
       c.interestPrice = priceMap.get(k).price;
       c.interestPriceBracket = priceBracket(c.interestPrice);
+      c.interestPriceFmt = fmtPrice(c.interestPrice);
     }
   }
 }
@@ -1054,7 +1072,13 @@ function applyEnquiryData(parcels, contacts) {
     p.enquiryDateMs = c.enquiryDateMs;
     p.enquiryInterest = c.interest || "";
     p.enquiryInterestPrice = c.interestPrice || null;
+    p.enquiryInterestPriceFmt = c.interestPriceFmt || "";
     p.enquiryInterestBracket = c.interestPriceBracket || "";
+    p.enquiryActiveBuyer = c.activeBuyer === true ? "Y" : (c.activeBuyer === false ? "N" : "");
+    p.enquiryPotentialInvestor = c.potentialInvestor === true ? "Y" : "";
+    p.enquiryDoNotContact = c.doNotContact === true;
+    p.enquiryDoNotCall = c.doNotCall === true;
+    p.enquiryDoNotEmail = c.doNotEmail === true;
     p.recentEnquiry = c.enquiryDateMs ? (now - c.enquiryDateMs) <= windowMs : false;
     if (p.inSC && !p.nonSaleable) {
       p.warmSeller = true;
@@ -1749,14 +1773,18 @@ function managedTable(rows) {
 }
 function warmTable(rows) {
   if (!rows.length) return `<div class="empty">No warm sellers yet. A warm seller is a LockedOn enquirer who <b>also owns a current Sunshine Coast property</b> in your database. Load the RP Data export(s) for the suburbs where your enquirers own, then drop your LockedOn enquiry CSV.</div>`;
-  const body = rows.map(p => `
+  const body = rows.map(p => {
+    const inv = p.enquiryPotentialInvestor === "Y" ? `<span class="pill-inv" title="Notes mentioned 'invest'">INV</span>` : "";
+    return `
     <tr class="s${p.combinedScore}">
       <td class="score">${p.combinedScore}</td>
       <td>${enquiryCell(p)}</td>
-      <td>${esc(p.enquiryContact)}</td>
+      <td>${esc(p.enquiryContact)} ${inv}</td>
+      <td>${esc(p.enquiryDateStr)}</td>
       <td>${esc(p.enquiryInterest)}</td>
+      <td>${esc(p.enquiryInterestPriceFmt)}</td>
       <td>${esc(p.enquiryInterestBracket)}</td>
-      <td>${esc(fmtPrice(p.enquiryInterestPrice))}</td>
+      <td>${esc(p.enquiryActiveBuyer)}</td>
       <td>${esc(p.owner1)}</td>
       <td>${esc(p.fullAddress)}</td>
       <td>${esc(p.suburbName)}</td>
@@ -1764,9 +1792,10 @@ function warmTable(rows) {
       <td>${gradeSpan(p.sellerLead)}</td>
       <td>${esc(p.ownerType)}</td>
       <td>${esc(p.recommendedAction)}</td>
-    </tr>`).join("");
+    </tr>`;
+  }).join("");
   return `<div class="table-scroll"><table>
-    <thead><tr><th>Score</th><th>Warm</th><th>Enquirer</th><th>Enquired On</th><th>Bracket</th><th>Price</th><th>Owner (database)</th><th>SC Property Owned</th><th>Suburb</th><th>Props</th><th>Seller</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
+    <thead><tr><th>Score</th><th>Warm</th><th>Enquirer</th><th>Enquiry Date</th><th>Enquired On</th><th>Buyer $$$</th><th>Bracket</th><th>Active Buyer</th><th>Owner (database)</th><th>SC Property Owned</th><th>Suburb</th><th>Props</th><th>Seller</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 function reviewTable(rows) {
@@ -1792,21 +1821,27 @@ function reviewTable(rows) {
     <thead><tr><th>Enquirer</th><th>Email</th><th>Possible owner (database)</th><th>SC Property</th><th>Suburb</th><th>Why uncertain</th><th>Decision</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
+function yn(v) { return v === true ? "Y" : v === false ? "N" : ""; }
+function investorPill(c) { return c.potentialInvestor ? `<span class="pill-inv" title="Notes mentioned 'invest'">INV</span>` : ""; }
 function holdingTable(rows) {
   if (!rows.length) return `<div class="empty">Nothing in holding. Enquirers who aren't yet confirmed as current Sunshine Coast owners land here — ready to cross-check against RP Data when you get a chance.</div>`;
   const body = rows.map(c => `
     <tr>
-      <td>${esc(c.name)}</td>
-      <td>${esc(c.email)}</td>
-      <td>${esc(c.phone)}</td>
+      <td>${esc(c.name)} ${investorPill(c)}</td>
       <td>${esc(c.enquiryDateStr)}</td>
+      <td>${esc(c.phone)}</td>
+      <td>${esc(c.email)}</td>
+      <td>${esc(yn(c.activeBuyer))}</td>
       <td>${esc(c.interest)}</td>
+      <td>${esc(c.interestPriceFmt)}</td>
+      <td>${esc(c.interestPriceBracket)}</td>
+      <td>${esc(yn(c.potentialInvestor))}</td>
       <td>${esc(c.contactType)}</td>
       <td>${esc(c.source)}</td>
     </tr>`).join("");
-  return `<div class="filterbar"><span class="muted">These enquirers are not yet matched to a current SC property. Pull their RP Data, drop the suburb export in, and any who own on the Coast will move to Warm Sellers automatically.</span></div>
+  return `<div class="filterbar"><span class="muted">Enquirers not yet matched to an SC property. Pull their RP Data, drop the suburb export in, and any who own on the Coast will move to Warm Sellers automatically. <b>INV</b> = "invest" found in notes.</span></div>
     <div class="table-scroll"><table>
-    <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Enquiry Date</th><th>Property Enquired On</th><th>Enquiry Type</th><th>Source File</th></tr></thead>
+    <thead><tr><th>Name</th><th>Enquiry Date</th><th>Phone</th><th>Email</th><th>Active Buyer</th><th>Property Enquired On</th><th>Buyer $$$</th><th>Buyer Bracket</th><th>Potential Investor</th><th>Lead Source</th><th>Source File</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 
@@ -1905,20 +1940,35 @@ const EXPORT_COLS = [
   ["parcelDetails","Parcel Details"],["openInRpData","Open in RPData"]
 ];
 const WARM_COLS = [
-  ["combinedScore","Score"],["tier","Tier"],["enquiryContact","Enquirer (LockedOn)"],["enquiryDateStr","Enquiry Date"],
-  ["enquiryInterest","Enquired On"],["enquiryInterestBracket","Enquired Bracket"],["enquiryInterestPrice","Enquired Price"],
+  ["combinedScore","Score"],["tier","Tier"],
+  ["enquiryContact","Enquirer"],["enquiryDateStr","Enquiry Date"],
+  ["enquiryInterest","Enquired On"],["enquiryInterestPriceFmt","Buyer $$$"],["enquiryInterestBracket","Buyer Bracket"],
+  ["enquiryActiveBuyer","Active Buyer"],["enquiryPotentialInvestor","Potential Investor"],
   ["owner1","Owner (database)"],["fullAddress","SC Property Owned"],["suburbName","Suburb"],
   ["postalAddress","Postal Address"],["ownerNotes","Notes"],
   ["underManagement","Under Management"],["managedPortfolio","Managed Portfolio"],
   ["ownerPropertyCount","Properties Owned"],
   ["sellerLead","Seller Lead"],["ownerType","Owner Type"],["recommendedAction","Recommended Action"]
 ];
+// Per user's column choice for the report_84 / enquiry CSVs:
+// 2 Name · 6 Enquiry Date · 8 Phone · 9 Email · 10 Active Buyer ·
+// 15 Property Enquired On (+ matched price/bracket) · 16 Investor scan (Y/N) ·
+// 18 Lead Source · Source File · two workflow blanks for RP Data follow-up.
+// (do-not-contact/call/email flags read internally; not displayed.)
 const HOLDING_COLS = [
-  ["name","Name"],["interest","Property Enquired On"],
-  ["interestPriceBracket","Enquired Bracket"],["interestPrice","Enquired Price"],
-  ["email","Email"],["phone","Phone"],
-  ["enquiryDateStr","Enquiry Date"],["contactType","Enquiry Type"],["source","Source File"],
-  ["rpDataOwner","RP Data Owner (fill after search)"],["rpDataResult","Owns SC property? (Y/N)"]
+  ["name","Name"],
+  ["enquiryDateStr","Enquiry Date"],
+  ["phone","Phone"],
+  ["email","Email"],
+  ["activeBuyer","Active Buyer"],
+  ["interest","Property Enquired On"],
+  ["interestPriceFmt","Buyer $$$"],
+  ["interestPriceBracket","Buyer Bracket"],
+  ["potentialInvestor","Potential Investor"],
+  ["contactType","Lead Source"],
+  ["source","Source File"],
+  ["rpDataOwner","RP Data Owner (fill after search)"],
+  ["rpDataResult","Owns SC property? (Y/N)"]
 ];
 const MANAGED_COLS = [
   ["combinedScore","Score"],["tier","Tier"],["owner1","Owner"],

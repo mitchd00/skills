@@ -1,5 +1,16 @@
-BATCH INTELLIGENCE HUB — Browser Edition  (V3.4)
+BATCH INTELLIGENCE HUB — Browser Edition  (V3.5)
 Elite Lifestyle Properties
+
+V3.5 — enquiry import gains "Buyer $$$" (price of the property
+they enquired on, looked up from RP Data sales) and a "Potential
+Investor" flag (notes mention "invest"). Handles the LockedOn
+report_84.csv format (hyphenated headers, ISO dates) with no
+column-mapping prompt. Also reads active-buyer and the three
+do-not-contact/call/email flags. Holding tab columns are now
+focused: Name, Enquiry Date, Phone, Email, Active Buyer,
+Property Enquired On, Buyer $$$, Buyer Bracket, Potential
+Investor, Lead Source, Source File. Warm Sellers picks up the
+same enquiry-side fields next to the owned-property data.
 
 V3.4 is mobile-friendly. Open bpi-hub.html on an iPhone (use
 Safari, then "Add to Home Screen" if you want it as an icon).
