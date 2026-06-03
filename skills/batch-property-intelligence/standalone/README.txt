@@ -1,5 +1,14 @@
-BATCH INTELLIGENCE HUB — Browser Edition  (V3.5)
+BATCH INTELLIGENCE HUB — Browser Edition  (V3.6)
 Elite Lifestyle Properties
+
+V3.6 — DNC enquirers (do-not-contact / do-not-call / do-not-email
+flagged in the source CSV) are now shown with RED text and a
+DNC badge on every Holding / Warm Sellers row, so you can't
+accidentally outreach them. Also: when an enquiry's "Property
+Enquired On" address matches a property in your Managed Properties
+list, the row shows a blue "OUR PM · Residential" badge — a strong
+cross-signal that the enquirer is shopping for one of our managed
+rentals.
 
 V3.5 — enquiry import gains "Buyer $$$" (price of the property
 they enquired on, looked up from RP Data sales) and a "Potential

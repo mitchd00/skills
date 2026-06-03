@@ -62,6 +62,9 @@
   .modal-actions { margin-top: 18px; display: flex; gap: 8px; }
   .pill-um { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #1a73e8; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .4px; white-space: nowrap; }
   .pill-inv { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #2e7d32; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .4px; white-space: nowrap; }
+  .pill-dnc { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #c62828; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .4px; white-space: nowrap; }
+  tr.dnc-row td { color: #c62828; }
+  tr.dnc-row td.score { color: #c62828; }
   .tier-hot { display: inline-block; margin-left: 4px; padding: 1px 5px; border-radius: 3px; background: #f57c00; color: #fff; font-size: 9px; font-weight: 800; letter-spacing: .3px; }
   .tier-flaming { display: inline-block; margin-left: 4px; padding: 1px 5px; border-radius: 3px; background: #c62828; color: #fff; font-size: 9px; font-weight: 800; letter-spacing: .3px; }
 
@@ -199,7 +202,7 @@
     <h1>BATCH INTELLIGENCE HUB</h1>
     <div class="sub">Elite Lifestyle Properties — browser edition</div>
   </div>
-  <div class="sub" id="versionTag">V3.5 · 1 June 2026 · runs entirely on your machine · no data leaves the browser</div>
+  <div class="sub" id="versionTag">V3.6 · 1 June 2026 · runs entirely on your machine · no data leaves the browser</div>
 </header>
 
 <div class="wrap">
@@ -971,6 +974,7 @@ function addressKeyForMatching(addrStr) {
 // interestPrice + interestPriceBracket. Latest sale per parcel wins.
 function applyInterestPrices(parcels, contacts) {
   if (!contacts || !contacts.length) return;
+  // Build addr→latest-price map from parcels.
   const priceMap = new Map();
   for (const p of parcels) {
     if (!p.salePrice || p.salePrice < 1) continue;
@@ -981,16 +985,33 @@ function applyInterestPrices(parcels, contacts) {
       priceMap.set(k, { price: p.salePrice, ms: p.saleDateMs || 0 });
     }
   }
+  // Build addr→managed-entry map for "enquired on a property we manage" signal.
+  const managedMap = new Map();
+  for (const m of Object.values(MANAGED.byAddressKey || {})) {
+    if (!m || !m.address) continue;
+    const k = addressKeyForMatching(m.address);
+    if (k) managedMap.set(k, m);
+  }
   for (const c of contacts) {
     c.interestPrice = null;
     c.interestPriceBracket = "";
     c.interestPriceFmt = "";
+    c.interestManaged = false;
+    c.interestManagedPortfolio = "";
+    c.interestManagedPropertyManager = "";
     if (!c.interest) continue;
     const k = addressKeyForMatching(c.interest);
-    if (k && priceMap.has(k)) {
+    if (!k) continue;
+    if (priceMap.has(k)) {
       c.interestPrice = priceMap.get(k).price;
       c.interestPriceBracket = priceBracket(c.interestPrice);
       c.interestPriceFmt = fmtPrice(c.interestPrice);
+    }
+    if (managedMap.has(k)) {
+      const m = managedMap.get(k);
+      c.interestManaged = true;
+      c.interestManagedPortfolio = m.portfolio || "";
+      c.interestManagedPropertyManager = m.propertyManager || "";
     }
   }
 }
@@ -1076,6 +1097,8 @@ function applyEnquiryData(parcels, contacts) {
     p.enquiryInterestBracket = c.interestPriceBracket || "";
     p.enquiryActiveBuyer = c.activeBuyer === true ? "Y" : (c.activeBuyer === false ? "N" : "");
     p.enquiryPotentialInvestor = c.potentialInvestor === true ? "Y" : "";
+    p.enquiryInterestManaged = c.interestManaged === true;
+    p.enquiryInterestManagedPortfolio = c.interestManagedPortfolio || "";
     p.enquiryDoNotContact = c.doNotContact === true;
     p.enquiryDoNotCall = c.doNotCall === true;
     p.enquiryDoNotEmail = c.doNotEmail === true;
@@ -1775,13 +1798,22 @@ function warmTable(rows) {
   if (!rows.length) return `<div class="empty">No warm sellers yet. A warm seller is a LockedOn enquirer who <b>also owns a current Sunshine Coast property</b> in your database. Load the RP Data export(s) for the suburbs where your enquirers own, then drop your LockedOn enquiry CSV.</div>`;
   const body = rows.map(p => {
     const inv = p.enquiryPotentialInvestor === "Y" ? `<span class="pill-inv" title="Notes mentioned 'invest'">INV</span>` : "";
+    const dnc = p.enquiryDoNotContact || p.enquiryDoNotCall || p.enquiryDoNotEmail;
+    let dncPill = "";
+    if (dnc) {
+      const parts = [];
+      if (p.enquiryDoNotContact) parts.push("Contact");
+      if (p.enquiryDoNotCall)    parts.push("Call");
+      if (p.enquiryDoNotEmail)   parts.push("Email");
+      dncPill = `<span class="pill-dnc" title="Do Not ${parts.join(' · Do Not ')}">DNC · ${parts.join("/")}</span>`;
+    }
     return `
-    <tr class="s${p.combinedScore}">
+    <tr class="s${p.combinedScore} ${dnc ? "dnc-row" : ""}">
       <td class="score">${p.combinedScore}</td>
       <td>${enquiryCell(p)}</td>
-      <td>${esc(p.enquiryContact)} ${inv}</td>
+      <td>${esc(p.enquiryContact)} ${inv} ${dncPill}</td>
       <td>${esc(p.enquiryDateStr)}</td>
-      <td>${esc(p.enquiryInterest)}</td>
+      <td>${esc(p.enquiryInterest)} ${p.enquiryInterestManaged ? `<span class="pill-um" title="We manage this property">OUR PM${p.enquiryInterestManagedPortfolio ? " · " + esc(p.enquiryInterestManagedPortfolio) : ""}</span>` : ""}</td>
       <td>${esc(p.enquiryInterestPriceFmt)}</td>
       <td>${esc(p.enquiryInterestBracket)}</td>
       <td>${esc(p.enquiryActiveBuyer)}</td>
@@ -1823,23 +1855,45 @@ function reviewTable(rows) {
 }
 function yn(v) { return v === true ? "Y" : v === false ? "N" : ""; }
 function investorPill(c) { return c.potentialInvestor ? `<span class="pill-inv" title="Notes mentioned 'invest'">INV</span>` : ""; }
+function dncFlags(c) {
+  const f = [];
+  if (c.doNotContact) f.push("Do Not Contact");
+  if (c.doNotCall)    f.push("Do Not Call");
+  if (c.doNotEmail)   f.push("Do Not Email");
+  return f;
+}
+function managedPropertyPill(c) {
+  if (!c.interestManaged) return "";
+  const label = c.interestManagedPortfolio ? "OUR PM · " + c.interestManagedPortfolio : "OUR PM";
+  const title = "We manage this property" + (c.interestManagedPropertyManager ? " (PM: " + c.interestManagedPropertyManager + ")" : "");
+  return `<span class="pill-um" title="${esc(title)}">${esc(label)}</span>`;
+}
+function dncPill(c) {
+  const f = dncFlags(c);
+  if (!f.length) return "";
+  const short = f.map(s => s === "Do Not Call" ? "Call" : s === "Do Not Email" ? "Email" : "Contact").join("/");
+  return `<span class="pill-dnc" title="${esc(f.join(" · "))}">DNC · ${short}</span>`;
+}
 function holdingTable(rows) {
   if (!rows.length) return `<div class="empty">Nothing in holding. Enquirers who aren't yet confirmed as current Sunshine Coast owners land here — ready to cross-check against RP Data when you get a chance.</div>`;
-  const body = rows.map(c => `
-    <tr>
-      <td>${esc(c.name)} ${investorPill(c)}</td>
+  const body = rows.map(c => {
+    const dnc = dncFlags(c).length > 0;
+    return `
+    <tr class="${dnc ? "dnc-row" : ""}">
+      <td>${esc(c.name)} ${investorPill(c)} ${dncPill(c)}</td>
       <td>${esc(c.enquiryDateStr)}</td>
       <td>${esc(c.phone)}</td>
       <td>${esc(c.email)}</td>
       <td>${esc(yn(c.activeBuyer))}</td>
-      <td>${esc(c.interest)}</td>
+      <td>${esc(c.interest)} ${managedPropertyPill(c)}</td>
       <td>${esc(c.interestPriceFmt)}</td>
       <td>${esc(c.interestPriceBracket)}</td>
       <td>${esc(yn(c.potentialInvestor))}</td>
       <td>${esc(c.contactType)}</td>
       <td>${esc(c.source)}</td>
-    </tr>`).join("");
-  return `<div class="filterbar"><span class="muted">Enquirers not yet matched to an SC property. Pull their RP Data, drop the suburb export in, and any who own on the Coast will move to Warm Sellers automatically. <b>INV</b> = "invest" found in notes.</span></div>
+    </tr>`;
+  }).join("");
+  return `<div class="filterbar"><span class="muted">Enquirers not yet matched to an SC property. Pull their RP Data, drop the suburb export in, and any who own on the Coast will move to Warm Sellers automatically. <b>INV</b> = "invest" found in notes. <span style="color:#c62828;">Red rows</span> = do-not-call / do-not-email / do-not-contact flagged in the source CSV — do not outreach.</span></div>
     <div class="table-scroll"><table>
     <thead><tr><th>Name</th><th>Enquiry Date</th><th>Phone</th><th>Email</th><th>Active Buyer</th><th>Property Enquired On</th><th>Buyer $$$</th><th>Buyer Bracket</th><th>Potential Investor</th><th>Lead Source</th><th>Source File</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
@@ -1944,6 +1998,7 @@ const WARM_COLS = [
   ["enquiryContact","Enquirer"],["enquiryDateStr","Enquiry Date"],
   ["enquiryInterest","Enquired On"],["enquiryInterestPriceFmt","Buyer $$$"],["enquiryInterestBracket","Buyer Bracket"],
   ["enquiryActiveBuyer","Active Buyer"],["enquiryPotentialInvestor","Potential Investor"],
+  ["enquiryInterestManaged","Enquired-On UM"],["enquiryInterestManagedPortfolio","UM Portfolio"],
   ["owner1","Owner (database)"],["fullAddress","SC Property Owned"],["suburbName","Suburb"],
   ["postalAddress","Postal Address"],["ownerNotes","Notes"],
   ["underManagement","Under Management"],["managedPortfolio","Managed Portfolio"],
@@ -1965,6 +2020,8 @@ const HOLDING_COLS = [
   ["interestPriceFmt","Buyer $$$"],
   ["interestPriceBracket","Buyer Bracket"],
   ["potentialInvestor","Potential Investor"],
+  ["interestManaged","Enquired-On UM"],
+  ["interestManagedPortfolio","UM Portfolio"],
   ["contactType","Lead Source"],
   ["source","Source File"],
   ["rpDataOwner","RP Data Owner (fill after search)"],
