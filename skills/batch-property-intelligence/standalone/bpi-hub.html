@@ -203,7 +203,7 @@
     <h1>BATCH INTELLIGENCE HUB</h1>
     <div class="sub">Elite Lifestyle Properties — browser edition</div>
   </div>
-  <div class="sub" id="versionTag">V3.7 · 1 June 2026 · runs entirely on your machine · no data leaves the browser</div>
+  <div class="sub" id="versionTag">V3.8 · 1 June 2026 · runs entirely on your machine · no data leaves the browser</div>
 </header>
 
 <div class="wrap">
@@ -1162,7 +1162,10 @@ function computeHolding(contacts, parcels) {
     const prev = byPerson.get(key);
     if (!prev || (c.enquiryDateMs || 0) > (prev.enquiryDateMs || 0)) byPerson.set(key, c);
   }
-  return Array.from(byPerson.values()).sort((a, b) => (b.enquiryDateMs || 0) - (a.enquiryDateMs || 0));
+  // Default sort: hottest = most enquiries per person first, then most recent.
+  return Array.from(byPerson.values()).sort((a, b) =>
+    ((b.enquiryCount || 1) - (a.enquiryCount || 1)) ||
+    ((b.enquiryDateMs || 0) - (a.enquiryDateMs || 0)));
 }
 
 // Full recompute across all stored sale records → array of scored current-owner parcels.
@@ -1689,13 +1692,17 @@ function renderDashboard() {
   const flaming = saleable.filter(p => p.combinedScore > 15).length;
   const hot = saleable.filter(p => p.combinedScore > 10 && p.combinedScore <= 15).length;
   const managedRows = saleable.filter(p => p.managedHere);
+  const repeatEnquirers = HOLDING.filter(c => (c.enquiryCount || 1) >= 2).length
+                        + WARM.filter(p => (p.enquiryCount || 1) >= 2).length;
+  const uniquePeople = HOLDING.length + WARM.length;
   document.getElementById("statGrid").innerHTML = [
     card(DATASET.length, "Total parcels"),
     card(WARM.length, "Warm sellers"),
     card(managedRows.length, "Under management"),
     card(flaming, "🔥🔥 FLAMING"),
     card(hot, "🔥 HOT"),
-    card(owners2, "Multi-property"),
+    card(uniquePeople, "Unique enquirers"),
+    card(repeatEnquirers, "🔁 Repeat enquirers"),
   ].join("");
 
   setCount("high", high.length);
@@ -2318,6 +2325,9 @@ function buildSummarySheet() {
     ["🔥 Hot leads (score > 10)", saleable.filter(p => p.combinedScore > 10 && p.combinedScore <= 15).length],
     ["🔥🔥 Flaming Hot leads (score > 15)", saleable.filter(p => p.combinedScore > 15).length],
     ["Holding — enquirers pending RP Data lookup", HOLDING.length],
+    ["Unique enquirers (across all loaded files)", HOLDING.length + WARM.length],
+    ["🔁 Repeat enquirers (≥ 2 enquiries)", HOLDING.filter(c => (c.enquiryCount || 1) >= 2).length + WARM.filter(p => (p.enquiryCount || 1) >= 2).length],
+    ["    of which ≥ 5 enquiries", HOLDING.filter(c => (c.enquiryCount || 1) >= 5).length + WARM.filter(p => (p.enquiryCount || 1) >= 5).length],
     ["Generated", new Date().toLocaleString("en-AU")]
   ];
   return { name: "Summary", header: ["Metric", "Value"], rows };
