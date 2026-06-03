@@ -63,6 +63,7 @@
   .pill-um { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #1a73e8; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .4px; white-space: nowrap; }
   .pill-inv { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #2e7d32; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .4px; white-space: nowrap; }
   .pill-dnc { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #c62828; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .4px; white-space: nowrap; }
+  .pill-repeat { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #ef6c00; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .4px; white-space: nowrap; }
   tr.dnc-row td { color: #c62828; }
   tr.dnc-row td.score { color: #c62828; }
   .tier-hot { display: inline-block; margin-left: 4px; padding: 1px 5px; border-radius: 3px; background: #f57c00; color: #fff; font-size: 9px; font-weight: 800; letter-spacing: .3px; }
@@ -202,7 +203,7 @@
     <h1>BATCH INTELLIGENCE HUB</h1>
     <div class="sub">Elite Lifestyle Properties — browser edition</div>
   </div>
-  <div class="sub" id="versionTag">V3.6 · 1 June 2026 · runs entirely on your machine · no data leaves the browser</div>
+  <div class="sub" id="versionTag">V3.7 · 1 June 2026 · runs entirely on your machine · no data leaves the browser</div>
 </header>
 
 <div class="wrap">
@@ -972,6 +973,18 @@ function addressKeyForMatching(addrStr) {
 }
 // Look up each contact's enquired property in the RP Data parcels and tag
 // interestPrice + interestPriceBracket. Latest sale per parcel wins.
+// Count how many enquiries each person has made (across all loaded files).
+// Stored on every contact record so Holding/Warm-Seller views surface it.
+function applyEnquiryCounts(contacts) {
+  if (!contacts || !contacts.length) return;
+  const personKey = c => (c.name || "").toUpperCase().trim() + "|" + (c.email || "").toUpperCase().trim();
+  const counts = new Map();
+  for (const c of contacts) {
+    const k = personKey(c);
+    counts.set(k, (counts.get(k) || 0) + 1);
+  }
+  for (const c of contacts) c.enquiryCount = counts.get(personKey(c)) || 1;
+}
 function applyInterestPrices(parcels, contacts) {
   if (!contacts || !contacts.length) return;
   // Build addr→latest-price map from parcels.
@@ -1095,6 +1108,7 @@ function applyEnquiryData(parcels, contacts) {
     p.enquiryInterestPrice = c.interestPrice || null;
     p.enquiryInterestPriceFmt = c.interestPriceFmt || "";
     p.enquiryInterestBracket = c.interestPriceBracket || "";
+    p.enquiryCount = c.enquiryCount || 1;
     p.enquiryActiveBuyer = c.activeBuyer === true ? "Y" : (c.activeBuyer === false ? "N" : "");
     p.enquiryPotentialInvestor = c.potentialInvestor === true ? "Y" : "";
     p.enquiryInterestManaged = c.interestManaged === true;
@@ -1223,6 +1237,7 @@ function recompute(allSales, contacts = []) {
   }
   applyManual(parcels);
   applyManaged(parcels);
+  applyEnquiryCounts(contacts);
   applyInterestPrices(parcels, contacts);
   applyEnquiryData(parcels, contacts);
   applyManagedBoost(parcels);
@@ -1811,7 +1826,8 @@ function warmTable(rows) {
     <tr class="s${p.combinedScore} ${dnc ? "dnc-row" : ""}">
       <td class="score">${p.combinedScore}</td>
       <td>${enquiryCell(p)}</td>
-      <td>${esc(p.enquiryContact)} ${inv} ${dncPill}</td>
+      <td>${esc(p.enquiryContact)} ${enquiryCountPill(p.enquiryCount)} ${inv} ${dncPill}</td>
+      <td style="text-align:center;font-weight:600;">${p.enquiryCount || 1}</td>
       <td>${esc(p.enquiryDateStr)}</td>
       <td>${esc(p.enquiryInterest)} ${p.enquiryInterestManaged ? `<span class="pill-um" title="We manage this property">OUR PM${p.enquiryInterestManagedPortfolio ? " · " + esc(p.enquiryInterestManagedPortfolio) : ""}</span>` : ""}</td>
       <td>${esc(p.enquiryInterestPriceFmt)}</td>
@@ -1827,7 +1843,7 @@ function warmTable(rows) {
     </tr>`;
   }).join("");
   return `<div class="table-scroll"><table>
-    <thead><tr><th>Score</th><th>Warm</th><th>Enquirer</th><th>Enquiry Date</th><th>Enquired On</th><th>Buyer $$$</th><th>Bracket</th><th>Active Buyer</th><th>Owner (database)</th><th>SC Property Owned</th><th>Suburb</th><th>Props</th><th>Seller</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
+    <thead><tr><th>Score</th><th>Warm</th><th>Enquirer</th><th>Enq #</th><th>Enquiry Date</th><th>Enquired On</th><th>Buyer $$$</th><th>Bracket</th><th>Active Buyer</th><th>Owner (database)</th><th>SC Property Owned</th><th>Suburb</th><th>Props</th><th>Seller</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 function reviewTable(rows) {
@@ -1862,6 +1878,10 @@ function dncFlags(c) {
   if (c.doNotEmail)   f.push("Do Not Email");
   return f;
 }
+function enquiryCountPill(n) {
+  if (!n || n < 2) return "";
+  return `<span class="pill-repeat" title="${n} enquiries from this person — hotter lead">🔁 ${n}×</span>`;
+}
 function managedPropertyPill(c) {
   if (!c.interestManaged) return "";
   const label = c.interestManagedPortfolio ? "OUR PM · " + c.interestManagedPortfolio : "OUR PM";
@@ -1880,7 +1900,8 @@ function holdingTable(rows) {
     const dnc = dncFlags(c).length > 0;
     return `
     <tr class="${dnc ? "dnc-row" : ""}">
-      <td>${esc(c.name)} ${investorPill(c)} ${dncPill(c)}</td>
+      <td>${esc(c.name)} ${enquiryCountPill(c.enquiryCount)} ${investorPill(c)} ${dncPill(c)}</td>
+      <td style="text-align:center;font-weight:600;">${c.enquiryCount || 1}</td>
       <td>${esc(c.enquiryDateStr)}</td>
       <td>${esc(c.phone)}</td>
       <td>${esc(c.email)}</td>
@@ -1895,7 +1916,7 @@ function holdingTable(rows) {
   }).join("");
   return `<div class="filterbar"><span class="muted">Enquirers not yet matched to an SC property. Pull their RP Data, drop the suburb export in, and any who own on the Coast will move to Warm Sellers automatically. <b>INV</b> = "invest" found in notes. <span style="color:#c62828;">Red rows</span> = do-not-call / do-not-email / do-not-contact flagged in the source CSV — do not outreach.</span></div>
     <div class="table-scroll"><table>
-    <thead><tr><th>Name</th><th>Enquiry Date</th><th>Phone</th><th>Email</th><th>Active Buyer</th><th>Property Enquired On</th><th>Buyer $$$</th><th>Buyer Bracket</th><th>Potential Investor</th><th>Lead Source</th><th>Source File</th></tr></thead>
+    <thead><tr><th>Name</th><th>Enq #</th><th>Enquiry Date</th><th>Phone</th><th>Email</th><th>Active Buyer</th><th>Property Enquired On</th><th>Buyer $$$</th><th>Buyer Bracket</th><th>Potential Investor</th><th>Lead Source</th><th>Source File</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 
@@ -1995,7 +2016,7 @@ const EXPORT_COLS = [
 ];
 const WARM_COLS = [
   ["combinedScore","Score"],["tier","Tier"],
-  ["enquiryContact","Enquirer"],["enquiryDateStr","Enquiry Date"],
+  ["enquiryContact","Enquirer"],["enquiryCount","Enq #"],["enquiryDateStr","Enquiry Date"],
   ["enquiryInterest","Enquired On"],["enquiryInterestPriceFmt","Buyer $$$"],["enquiryInterestBracket","Buyer Bracket"],
   ["enquiryActiveBuyer","Active Buyer"],["enquiryPotentialInvestor","Potential Investor"],
   ["enquiryInterestManaged","Enquired-On UM"],["enquiryInterestManagedPortfolio","UM Portfolio"],
@@ -2012,6 +2033,7 @@ const WARM_COLS = [
 // (do-not-contact/call/email flags read internally; not displayed.)
 const HOLDING_COLS = [
   ["name","Name"],
+  ["enquiryCount","Enq #"],
   ["enquiryDateStr","Enquiry Date"],
   ["phone","Phone"],
   ["email","Email"],

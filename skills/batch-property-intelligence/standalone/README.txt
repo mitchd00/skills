@@ -1,5 +1,12 @@
-BATCH INTELLIGENCE HUB — Browser Edition  (V3.6)
+BATCH INTELLIGENCE HUB — Browser Edition  (V3.7)
 Elite Lifestyle Properties
+
+V3.7 — Each enquirer now carries an "Enq #" count showing how
+many separate enquiries they've made across all loaded files.
+Anyone with ≥2 enquiries gets an orange "🔁 N×" badge next to
+their name in Holding and Warm Sellers — repeat enquirers are
+hotter leads worth prioritising. The count is also a sortable
+column in both views and is included in CSV / workbook exports.
 
 V3.6 — DNC enquirers (do-not-contact / do-not-call / do-not-email
 flagged in the source CSV) are now shown with RED text and a
