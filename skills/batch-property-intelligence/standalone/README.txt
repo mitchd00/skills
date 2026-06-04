@@ -1,5 +1,18 @@
-BATCH INTELLIGENCE HUB — Browser Edition  (V3.9)
+BATCH INTELLIGENCE HUB — Browser Edition  (V4.0)
 Elite Lifestyle Properties
+
+V4.0 — Two new things in the export bar:
+- "Buyer $$$" dropdown (Any / <$500k / $500k–$1M / $1M–$2M /
+  $2M–$5M / $5M+) — narrows the Holding, Warm Sellers and the
+  workbook to one buyer price bracket, in addition to the
+  existing suburb filter.
+- "Outreach List (CSV)" button — combines warm sellers + active
+  enquirers (Holding) into ONE file, with DNC rows removed
+  automatically. Sorted by score then enquiry count, with
+  Phone, Email, Buyer $$$, OUR PM, INV and recommended-action
+  notes. Ready to hand to an agent. Also appears in the
+  complete workbook as a new "Outreach (DNC excluded)" tab
+  (workbook now 11 tabs).
 
 V3.9 — Repeat enquirers now move the Combined Score: a warm
 seller whose matched enquirer has 3-5 enquiries gets +1, ≥6

@@ -203,7 +203,7 @@
     <h1>BATCH INTELLIGENCE HUB</h1>
     <div class="sub">Elite Lifestyle Properties — browser edition</div>
   </div>
-  <div class="sub" id="versionTag">V3.9 · 1 June 2026 · runs entirely on your machine · no data leaves the browser</div>
+  <div class="sub" id="versionTag">V4.0 · 4 June 2026 · runs entirely on your machine · no data leaves the browser</div>
 </header>
 
 <div class="wrap">
@@ -240,6 +240,16 @@
         <option value="">All suburbs</option>
       </select>
     </label>
+    <label style="font-size:13px;font-weight:600;">Buyer $$$:
+      <select id="bracketFilter" style="padding:5px;border:1px solid #ccc;border-radius:4px;margin-left:4px;">
+        <option value="">Any bracket</option>
+        <option value="&lt;$500k">&lt;$500k</option>
+        <option value="$500k–$1M">$500k–$1M</option>
+        <option value="$1M–$2M">$1M–$2M</option>
+        <option value="$2M–$5M">$2M–$5M</option>
+        <option value="$5M+">$5M+</option>
+      </select>
+    </label>
     <button class="primary" id="exportWorkbookBtn">Complete workbook (Excel, all tabs)</button>
     <button id="exportSellerBtn">Seller Leads (CSV)</button>
     <button id="exportRentalsBtn">Rentals (CSV)</button>
@@ -248,6 +258,7 @@
     <button id="exportWarmBtn">Warm Sellers (CSV)</button>
     <button id="exportManagedBtn">Under Management (CSV)</button>
     <button id="exportHoldingBtn">Holding · Pending RP Data (CSV)</button>
+    <button id="exportOutreachBtn">Outreach List (CSV)</button>
     <button id="exportAllBtn">All Properties (CSV)</button>
   </div>
 
@@ -1129,6 +1140,8 @@ function applyEnquiryData(parcels, contacts) {
     p.enquiryInterestPriceFmt = c.interestPriceFmt || "";
     p.enquiryInterestBracket = c.interestPriceBracket || "";
     p.enquiryCount = c.enquiryCount || 1;
+    p.enquiryContactPhone = c.phone || "";
+    p.enquiryContactEmail = c.email || "";
     p.enquiryActiveBuyer = c.activeBuyer === true ? "Y" : (c.activeBuyer === false ? "N" : "");
     p.enquiryPotentialInvestor = c.potentialInvestor === true ? "Y" : "";
     p.enquiryInterestManaged = c.interestManaged === true;
@@ -2175,6 +2188,18 @@ function parcelsInSuburb(rows)   { const s = exSuburb(); return s ? rows.filter(
 function landlordsInSuburb(rows) { const s = exSuburb(); return s ? rows.filter(r => r.suburbName === s || (r.ownerRentalSuburbs || "").split(/;\s*/).includes(s) || (r.ownerRentalList || []).some(a => a.includes(s))) : rows; }
 function portfoliosInSuburb(rows){ const s = exSuburb(); return s ? rows.filter(r => r.suburbName === s || (r.ownerPropertyList || []).some(a => a.includes(s))) : rows; }
 function holdingInSuburb(rows)   { const s = exSuburb(); return s ? rows.filter(c => (c.interest || "").toLowerCase().includes(s.toLowerCase())) : rows; }
+// Buyer-bracket filter — uses the formatted bracket label stored on the row.
+function exBracket() { const el = document.getElementById("bracketFilter"); return el ? el.value : ""; }
+function brSuffix() { const b = exBracket(); return b ? "_" + b.replace(/[^A-Za-z0-9]+/g, "") : ""; }
+function brLabel() { const b = exBracket(); return b ? ` · ${b}` : ""; }
+function warmInBracket(rows)    { const b = exBracket(); return b ? rows.filter(p => p.enquiryInterestBracket === b) : rows; }
+function holdingInBracket(rows) { const b = exBracket(); return b ? rows.filter(c => c.interestPriceBracket === b) : rows; }
+// Anyone flagged do-not-call/email/contact in the source CSV is excluded
+// from outreach lists.
+function notDnc(x) {
+  return !(x.doNotContact || x.doNotCall || x.doNotEmail ||
+           x.enquiryDoNotContact || x.enquiryDoNotCall || x.enquiryDoNotEmail);
+}
 
 /* ── per-list CSV exports (respect the suburb filter) ── */
 function exportCSV(rows, cols, label, fileLabel) {
@@ -2194,9 +2219,81 @@ const exportRentals    = () => exportMatrix(landlordsInSuburb(subsetRentalLandlo
 const exportPortfolios = () => exportMatrix(portfoliosInSuburb(subsetPortfolios()), portfolioMatrix, "portfolios", "Portfolios");
 const exportHigh       = () => exportCSV(parcelsInSuburb(subsetHigh()), EXPORT_COLS, "high-priority leads", "HighPriority");
 const exportAll        = () => exportCSV(parcelsInSuburb(subsetAll()), EXPORT_COLS, "parcels", "AllProperties");
-const exportWarm       = () => exportCSV(parcelsInSuburb(WARM), WARM_COLS, "warm sellers", "WarmSellers");
+const exportWarm       = () => exportCSV(warmInBracket(parcelsInSuburb(WARM)), WARM_COLS, "warm sellers", "WarmSellers");
 const exportManaged    = () => exportCSV(parcelsInSuburb(DATASET.filter(p => p.managedHere).sort((a, b) => b.combinedScore - a.combinedScore)), MANAGED_COLS, "managed properties", "UnderManagement");
-const exportHolding    = () => exportCSV(holdingInSuburb(HOLDING), HOLDING_COLS, "holding enquirers", "Holding_PendingRPData");
+const exportHolding    = () => exportCSV(holdingInBracket(holdingInSuburb(HOLDING)), HOLDING_COLS, "holding enquirers", "Holding_PendingRPData");
+
+/* Outreach list — Warm Sellers + Holding combined, DNC rows removed, ready
+   for an agent to phone/email. Respects the Suburb + Buyer-bracket filters
+   and sorts by score then enquiry count. */
+const OUTREACH_COLS = [
+  ["leadType","Lead Type"],
+  ["score","Score"],
+  ["tier","Tier"],
+  ["name","Name"],
+  ["enquiryCount","Enq #"],
+  ["phone","Phone"],
+  ["email","Email"],
+  ["interest","Property Enquired On"],
+  ["interestPriceFmt","Buyer $$$"],
+  ["interestPriceBracket","Buyer Bracket"],
+  ["activeBuyer","Active Buyer"],
+  ["potentialInvestor","Potential Investor"],
+  ["managedHere","Enquired-On UM"],
+  ["managedPortfolio","UM Portfolio"],
+  ["ownedAddress","SC Property Owned"],
+  ["ownerDb","Owner (database)"],
+  ["recommendedAction","Recommended Action"]
+];
+function exportOutreach() {
+  const warmRows = warmInBracket(parcelsInSuburb(WARM))
+    .filter(notDnc)
+    .map(p => ({
+      leadType: "Warm Seller",
+      score: p.combinedScore,
+      tier: p.tier || tierLabel(p.combinedScore),
+      name: p.enquiryContact || "",
+      enquiryCount: p.enquiryCount || 1,
+      phone: p.enquiryContactPhone || "",
+      email: p.enquiryContactEmail || "",
+      interest: p.enquiryInterest || "",
+      interestPriceFmt: p.enquiryInterestPriceFmt || "",
+      interestPriceBracket: p.enquiryInterestBracket || "",
+      activeBuyer: p.enquiryActiveBuyer || "",
+      potentialInvestor: p.enquiryPotentialInvestor || "",
+      managedHere: p.enquiryInterestManaged ? "Y" : "",
+      managedPortfolio: p.enquiryInterestManagedPortfolio || "",
+      ownedAddress: p.fullAddress || "",
+      ownerDb: p.owner1 || "",
+      recommendedAction: p.recommendedAction || ""
+    }));
+  const holdRows = holdingInBracket(holdingInSuburb(HOLDING))
+    .filter(notDnc)
+    .map(c => ({
+      leadType: "Active Enquirer",
+      score: 0,
+      tier: "",
+      name: c.name || "",
+      enquiryCount: c.enquiryCount || 1,
+      phone: c.phone || "",
+      email: c.email || "",
+      interest: c.interest || "",
+      interestPriceFmt: c.interestPriceFmt || "",
+      interestPriceBracket: c.interestPriceBracket || "",
+      activeBuyer: c.activeBuyer === true ? "Y" : (c.activeBuyer === false ? "N" : ""),
+      potentialInvestor: c.potentialInvestor ? "Y" : "",
+      managedHere: c.interestManaged ? "Y" : "",
+      managedPortfolio: c.interestManagedPortfolio || "",
+      ownedAddress: "",
+      ownerDb: "",
+      recommendedAction: ""
+    }));
+  const rows = warmRows.concat(holdRows).sort((a, b) =>
+    (b.score - a.score) || (b.enquiryCount - a.enquiryCount));
+  if (!rows.length) { toast(`No outreach rows${subLabel()}${brLabel()} to export.`); return; }
+  downloadBlob(rowsToCSV(rows, OUTREACH_COLS), `BPI_Outreach${subSuffix()}${brSuffix()}_${stamp()}.csv`, "text/csv;charset=utf-8");
+  toast(`Exported ${rows.length} outreach row${rows.length === 1 ? "" : "s"}${subLabel()}${brLabel()} (DNC excluded).`);
+}
 
 /* ── minimal in-browser .xlsx writer (zip of XML, store method) ── */
 const CRC32_TABLE = (() => {
@@ -2357,22 +2454,48 @@ function buildSummarySheet() {
 }
 function exportWorkbook() {
   if (!DATASET.length) { toast("Nothing to export."); return; }
+  // Build the outreach rows the same way exportOutreach does, for the workbook tab.
+  const outreachRows = (() => {
+    const w = warmInBracket(parcelsInSuburb(WARM)).filter(notDnc).map(p => ({
+      leadType:"Warm Seller", score:p.combinedScore, tier:p.tier||tierLabel(p.combinedScore),
+      name:p.enquiryContact||"", enquiryCount:p.enquiryCount||1,
+      phone:p.enquiryContactPhone||"", email:p.enquiryContactEmail||"",
+      interest:p.enquiryInterest||"", interestPriceFmt:p.enquiryInterestPriceFmt||"",
+      interestPriceBracket:p.enquiryInterestBracket||"",
+      activeBuyer:p.enquiryActiveBuyer||"", potentialInvestor:p.enquiryPotentialInvestor||"",
+      managedHere:p.enquiryInterestManaged?"Y":"", managedPortfolio:p.enquiryInterestManagedPortfolio||"",
+      ownedAddress:p.fullAddress||"", ownerDb:p.owner1||"", recommendedAction:p.recommendedAction||""
+    }));
+    const h = holdingInBracket(holdingInSuburb(HOLDING)).filter(notDnc).map(c => ({
+      leadType:"Active Enquirer", score:0, tier:"",
+      name:c.name||"", enquiryCount:c.enquiryCount||1,
+      phone:c.phone||"", email:c.email||"",
+      interest:c.interest||"", interestPriceFmt:c.interestPriceFmt||"",
+      interestPriceBracket:c.interestPriceBracket||"",
+      activeBuyer:c.activeBuyer===true?"Y":(c.activeBuyer===false?"N":""),
+      potentialInvestor:c.potentialInvestor?"Y":"",
+      managedHere:c.interestManaged?"Y":"", managedPortfolio:c.interestManagedPortfolio||"",
+      ownedAddress:"", ownerDb:"", recommendedAction:""
+    }));
+    return w.concat(h).sort((a, b) => (b.score - a.score) || (b.enquiryCount - a.enquiryCount));
+  })();
   const sheets = [
     buildSummarySheet(),
-    sheetFrom("Warm Sellers", parcelsInSuburb(WARM), WARM_COLS),
+    sheetFrom("Warm Sellers", warmInBracket(parcelsInSuburb(WARM)), WARM_COLS),
+    sheetFrom("Outreach (DNC excluded)", outreachRows, OUTREACH_COLS),
     sheetFrom("Under Management", parcelsInSuburb(DATASET.filter(p => p.managedHere).sort((a, b) => b.combinedScore - a.combinedScore)), MANAGED_COLS),
     sheetFrom("High Priority", parcelsInSuburb(subsetHigh()), EXPORT_COLS),
     sheetFrom("Seller Leads", parcelsInSuburb(subsetSeller()), EXPORT_COLS),
     (() => { const rm = rentalsMatrix(landlordsInSuburb(subsetRentalLandlords())); return { name: "Rentals", header: rm.header, rows: rm.data.map(r => r.map(cellValue)) }; })(),
     (() => { const pm = portfolioMatrix(portfoliosInSuburb(subsetPortfolios())); return { name: "Portfolios", header: pm.header, rows: pm.data.map(r => r.map(cellValue)) }; })(),
     sheetFrom("All Properties", parcelsInSuburb(subsetAll()), EXPORT_COLS),
-    sheetFrom("Holding Pending RP Data", holdingInSuburb(HOLDING), HOLDING_COLS),
+    sheetFrom("Holding Pending RP Data", holdingInBracket(holdingInSuburb(HOLDING)), HOLDING_COLS),
     sheetFrom("Filtered Out", parcelsInSuburb(subsetFiltered()), FILTERED_COLS)
   ];
   const bytes = buildXlsx(sheets);
-  downloadBlob(bytes, `BPI_Master_Dashboard${subSuffix()}_${stamp()}.xlsx`,
+  downloadBlob(bytes, `BPI_Master_Dashboard${subSuffix()}${brSuffix()}_${stamp()}.xlsx`,
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  toast(`Exported workbook (10 tabs)${subLabel()} to Excel.`);
+  toast(`Exported workbook (11 tabs)${subLabel()}${brLabel()} to Excel.`);
 }
 
 /* ───────────────────────── UI wiring ───────────────────────── */
@@ -2415,6 +2538,7 @@ document.getElementById("exportHighBtn").addEventListener("click", exportHigh);
 document.getElementById("exportWarmBtn").addEventListener("click", exportWarm);
 document.getElementById("exportManagedBtn").addEventListener("click", exportManaged);
 document.getElementById("exportHoldingBtn").addEventListener("click", exportHolding);
+document.getElementById("exportOutreachBtn").addEventListener("click", exportOutreach);
 document.getElementById("exportAllBtn").addEventListener("click", exportAll);
 
 document.querySelectorAll(".tab").forEach(tab => {
