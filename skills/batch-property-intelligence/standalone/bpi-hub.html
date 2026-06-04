@@ -1423,7 +1423,7 @@ async function getRuns() {
 let DATASET = [];   // last recompute result (scored parcels)
 let WARM = [];      // current SC owners who enquired (warm sellers)
 let HOLDING = [];   // enquirers not yet confirmed as SC owners (pending RP Data)
-let CONTACTS = []; // last-loaded enquiry contacts (for chart + analytics)
+let ALL_CONTACTS = [];   // last-loaded enquiry contacts (for chart + analytics)
 
 const MAP_FIELDS = [
   ["name", "Name"], ["first", "First name"], ["last", "Last name"],
@@ -1710,7 +1710,7 @@ async function refresh() {
   DATASET = recompute(allSales, contacts);
   WARM = computeWarmSellers(DATASET);
   HOLDING = computeHolding(contacts, DATASET);
-  CONTACTS = contacts;
+  ALL_CONTACTS = contacts;
   document.getElementById("emptyState").style.display = "none";
   document.getElementById("dashboard").style.display = "block";
 
@@ -1779,7 +1779,7 @@ function renderDashboard() {
 
   // Summary panel
   const top20 = DATASET.slice().sort((a, b) => b.combinedScore - a.combinedScore).slice(0, 20);
-  const chartHTML = enquiryMomentumChart(CONTACTS);
+  const chartHTML = enquiryMomentumChart(ALL_CONTACTS);
   document.getElementById("panel-summary").innerHTML = `
     <h3 class="section">LEAD GRADE DISTRIBUTION</h3>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;max-width:640px;">
