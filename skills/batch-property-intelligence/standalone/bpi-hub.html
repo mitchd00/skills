@@ -64,6 +64,17 @@
   .pill-inv { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #2e7d32; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .4px; white-space: nowrap; }
   .pill-dnc { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #c62828; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .4px; white-space: nowrap; }
   .pill-repeat { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #ef6c00; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .4px; white-space: nowrap; }
+  .pill-contact { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: .4px; white-space: nowrap; cursor: pointer; border: 1px solid #bbb; background: #eee; color: #555; }
+  .pill-contact.done { background: #2e7d32; color: #fff; border-color: #2e7d32; }
+  .pill-contact:hover { filter: brightness(1.05); }
+  /* Multi-select action bar */
+  .selectbar { position: sticky; bottom: 8px; display: none; align-items: center; gap: 12px; padding: 10px 14px; margin: 12px 0; background: var(--elite-black); color: var(--warm-white); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.18); z-index: 10; }
+  .selectbar.show { display: flex; }
+  .selectbar button { background: var(--muted-gold); color: var(--elite-black); border: 0; padding: 7px 12px; border-radius: 4px; font-weight: 700; cursor: pointer; }
+  .selectbar button.ghost { background: transparent; color: var(--warm-white); border: 1px solid var(--warm-white); }
+  td.selcell { width: 26px; text-align: center; padding: 4px; }
+  tr.selected { background: rgba(180, 150, 80, 0.18); }
+  tr.selected td { font-weight: 600; }
   tr.dnc-row td { color: #c62828; }
   tr.dnc-row td.score { color: #c62828; }
   .tier-hot { display: inline-block; margin-left: 4px; padding: 1px 5px; border-radius: 3px; background: #f57c00; color: #fff; font-size: 9px; font-weight: 800; letter-spacing: .3px; }
@@ -203,7 +214,7 @@
     <h1>BATCH INTELLIGENCE HUB</h1>
     <div class="sub">Elite Lifestyle Properties — browser edition</div>
   </div>
-  <div class="sub" id="versionTag">V4.0 · 4 June 2026 · runs entirely on your machine · no data leaves the browser</div>
+  <div class="sub" id="versionTag">V4.1 · 4 June 2026 · runs entirely on your machine · no data leaves the browser</div>
 </header>
 
 <div class="wrap">
@@ -359,6 +370,12 @@
       <button id="mapCancel">Cancel</button>
     </div>
   </div>
+</div>
+
+<div class="selectbar" id="selectBar">
+  <span id="selectCount">0 owners selected</span>
+  <button id="markContactedBtn">✓ Mark contacted</button>
+  <button class="ghost" id="clearSelectionBtn">Clear</button>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -765,8 +782,12 @@ function pairKey(contact, ownerName) {
 function loadManual() {
   try {
     const s = JSON.parse(localStorage.getItem("bpi_manual") || "{}");
-    return { postalByOwner: s.postalByOwner || {}, notesByOwner: s.notesByOwner || {} };
-  } catch (e) { return { postalByOwner: {}, notesByOwner: {} }; }
+    return {
+      postalByOwner: s.postalByOwner || {},
+      notesByOwner: s.notesByOwner || {},
+      contactedByOwner: s.contactedByOwner || {}
+    };
+  } catch (e) { return { postalByOwner: {}, notesByOwner: {}, contactedByOwner: {} }; }
 }
 function saveManual() { localStorage.setItem("bpi_manual", JSON.stringify(MANUAL)); }
 let MANUAL = loadManual();
@@ -777,6 +798,9 @@ function applyManual(parcels) {
     if (mp) p.postalAddress = mp;
     const mn = MANUAL.notesByOwner[p.owner1];
     p.ownerNotes = mn || "";
+    const cc = MANUAL.contactedByOwner[p.owner1];
+    p.contactedCount = cc ? (cc.count || 0) : 0;
+    p.contactedLast  = cc ? (cc.last || "") : "";
   }
 }
 
@@ -1813,32 +1837,39 @@ function tierCell(p) {
 }
 function leadTable(rows) {
   if (!rows.length) return `<div class="empty">No matching properties.</div>`;
-  const body = rows.map(p => `
-    <tr class="s${Math.min(p.combinedScore, 10)}">
+  const body = rows.map(p => {
+    const selected = SELECTED_OWNERS.has(p.owner1);
+    return `
+    <tr class="s${Math.min(p.combinedScore, 10)} ${selected ? "selected" : ""}">
+      <td class="selcell">${selectCheckbox(p.owner1)}</td>
       <td class="score">${p.combinedScore} ${tierCell(p)}</td>
       <td>${gradeSpan(p.sellerLead)}</td>
       <td>${gradeSpan(p.rentalLead)}</td>
       <td>${enquiryCell(p)}</td>
       <td>${esc(p.fullAddress)}</td>
       <td>${esc(p.suburbName)}</td>
-      <td>${esc(p.owner1)}</td>
+      <td>${esc(p.owner1)} ${contactedPill(p.owner1, p.contactedCount)}</td>
       <td>${esc(p.ownerClass)}</td>
       <td style="text-align:center;">${p.ownerPropertyCount}</td>
       <td style="text-align:center;">${p.ownerRentalCount}</td>
       <td>${esc(p.ownerType)}</td>
       <td>${esc(p.recommendedAction)}</td>
-    </tr>`).join("");
+    </tr>`;
+  }).join("");
   return `<div class="table-scroll"><table>
-    <thead><tr><th>Score</th><th>Seller</th><th>Rental</th><th>Status</th><th>Address</th><th>Suburb</th><th>Owner</th><th>Class</th><th>Props</th><th>Rentals</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
+    <thead><tr><th></th><th>Score</th><th>Seller</th><th>Rental</th><th>Status</th><th>Address</th><th>Suburb</th><th>Owner</th><th>Class</th><th>Props</th><th>Rentals</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 function managedTable(rows) {
   if (!rows.length) return `<div class="empty">No managed properties matched yet. Upload your Owner / Properties-Under-Management CSV (see "Pick Managed Properties CSV…"). The tool flags every owner you manage on every row they appear on, and links the specific parcels when the address matches.</div>`;
-  const body = rows.map(p => `
-    <tr class="s${Math.min(p.combinedScore, 10)}">
+  const body = rows.map(p => {
+    const selected = SELECTED_OWNERS.has(p.owner1);
+    return `
+    <tr class="s${Math.min(p.combinedScore, 10)} ${selected ? "selected" : ""}">
+      <td class="selcell">${selectCheckbox(p.owner1)}</td>
       <td class="score">${p.combinedScore} ${tierCell(p)}</td>
       <td>${enquiryCell(p)}</td>
-      <td>${esc(p.owner1)}</td>
+      <td>${esc(p.owner1)} ${contactedPill(p.owner1, p.contactedCount)}</td>
       <td>${esc(p.fullAddress)}</td>
       <td>${esc(p.suburbName)}</td>
       <td>${esc(p.managedPortfolio)}</td>
@@ -1846,10 +1877,11 @@ function managedTable(rows) {
       <td>${esc(p.managedTenancy)}</td>
       <td>${esc(p.managedRent)}</td>
       <td>${esc(p.recommendedAction)}</td>
-    </tr>`).join("");
+    </tr>`;
+  }).join("");
   return `<div class="filterbar"><span class="muted">Properties we currently manage that also appear in the RP Data ownership database. The owner-level UM badge shows everywhere these owners appear on the dashboard.</span></div>
     <div class="table-scroll"><table>
-    <thead><tr><th>Score</th><th>Status</th><th>Owner</th><th>Address</th><th>Suburb</th><th>Portfolio</th><th>Property Manager</th><th>Tenancy</th><th>Rent</th><th>Recommended Action</th></tr></thead>
+    <thead><tr><th></th><th>Score</th><th>Status</th><th>Owner</th><th>Address</th><th>Suburb</th><th>Portfolio</th><th>Property Manager</th><th>Tenancy</th><th>Rent</th><th>Recommended Action</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 function warmTable(rows) {
@@ -1865,8 +1897,10 @@ function warmTable(rows) {
       if (p.enquiryDoNotEmail)   parts.push("Email");
       dncPill = `<span class="pill-dnc" title="Do Not ${parts.join(' · Do Not ')}">DNC · ${parts.join("/")}</span>`;
     }
+    const selected = SELECTED_OWNERS.has(p.owner1);
     return `
-    <tr class="s${p.combinedScore} ${dnc ? "dnc-row" : ""}">
+    <tr class="s${p.combinedScore} ${dnc ? "dnc-row" : ""} ${selected ? "selected" : ""}">
+      <td class="selcell">${selectCheckbox(p.owner1)}</td>
       <td class="score">${p.combinedScore}</td>
       <td>${enquiryCell(p)}</td>
       <td>${esc(p.enquiryContact)} ${enquiryCountPill(p.enquiryCount)} ${inv} ${dncPill}</td>
@@ -1876,7 +1910,7 @@ function warmTable(rows) {
       <td>${esc(p.enquiryInterestPriceFmt)}</td>
       <td>${esc(p.enquiryInterestBracket)}</td>
       <td>${esc(p.enquiryActiveBuyer)}</td>
-      <td>${esc(p.owner1)}</td>
+      <td>${esc(p.owner1)} ${contactedPill(p.owner1, p.contactedCount)}</td>
       <td>${esc(p.fullAddress)}</td>
       <td>${esc(p.suburbName)}</td>
       <td style="text-align:center;">${p.ownerPropertyCount}</td>
@@ -1886,7 +1920,7 @@ function warmTable(rows) {
     </tr>`;
   }).join("");
   return `<div class="table-scroll"><table>
-    <thead><tr><th>Score</th><th>Warm</th><th>Enquirer</th><th>Enq #</th><th>Enquiry Date</th><th>Enquired On</th><th>Buyer $$$</th><th>Bracket</th><th>Active Buyer</th><th>Owner (database)</th><th>SC Property Owned</th><th>Suburb</th><th>Props</th><th>Seller</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
+    <thead><tr><th></th><th>Score</th><th>Warm</th><th>Enquirer</th><th>Enq #</th><th>Enquiry Date</th><th>Enquired On</th><th>Buyer $$$</th><th>Bracket</th><th>Active Buyer</th><th>Owner (database)</th><th>SC Property Owned</th><th>Suburb</th><th>Props</th><th>Seller</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 function reviewTable(rows) {
@@ -2050,6 +2084,7 @@ const EXPORT_COLS = [
   ["bed","Bed"],["bath","Bath"],["car","Car"],["landSize","Land Size m2"],["yearBuilt","Year Built"],
   ["owner1","Owner 1"],["ownerClass","Owner Class"],["ownerType","Owner Type"],["jointOwner","Joint Owner"],
   ["owner2","Owner 2"],["postalAddress","Postal Address"],["ownerNotes","Notes"],
+  ["contactedCount","Contacted #"],["contactedLast","Last Contacted"],
   ["underManagement","Under Management"],["managedPortfolio","Managed Portfolio"],
   ["ownerPropertyCount","Owner Property Count"],["ownerRentalCount","Owner Rental Count"],
   ["ownerProperties","Owner Properties"],["ownerRentals","Owner Rentals"],["portfolioInvestor","Portfolio Investor"],
@@ -2065,6 +2100,7 @@ const WARM_COLS = [
   ["enquiryInterestManaged","Enquired-On UM"],["enquiryInterestManagedPortfolio","UM Portfolio"],
   ["owner1","Owner (database)"],["fullAddress","SC Property Owned"],["suburbName","Suburb"],
   ["postalAddress","Postal Address"],["ownerNotes","Notes"],
+  ["contactedCount","Contacted #"],["contactedLast","Last Contacted"],
   ["underManagement","Under Management"],["managedPortfolio","Managed Portfolio"],
   ["ownerPropertyCount","Properties Owned"],
   ["sellerLead","Seller Lead"],["ownerType","Owner Type"],["recommendedAction","Recommended Action"]
@@ -2567,6 +2603,71 @@ document.getElementById("panel-review").addEventListener("click", e => {
   toast(btn.dataset.review === "approve" ? "Approved — flagged as warm seller." : "Rejected — match dismissed.");
 });
 
+/* Outreach contact-counter + multi-select.
+   Click the green pill on a single row to log one contact for that owner.
+   Tick checkboxes on multiple rows, then "Mark contacted" applies to all. */
+const SELECTED_OWNERS = new Set();
+function contactedPill(owner, count) {
+  const c = count || 0;
+  const cls = c > 0 ? "pill-contact done" : "pill-contact";
+  return `<span class="${cls}" data-contact-owner="${esc(owner)}" title="Click to log a contact for ${esc(owner)}. Shift-click to reset.">✓ ${c}</span>`;
+}
+function selectCheckbox(owner) {
+  const checked = SELECTED_OWNERS.has(owner) ? " checked" : "";
+  return `<input type="checkbox" data-select-owner="${esc(owner)}"${checked}>`;
+}
+function bumpContacted(ownerNames, reset) {
+  const stamp = new Date().toISOString();
+  for (const owner of ownerNames) {
+    if (!owner || owner === "-") continue;
+    if (reset) { delete MANUAL.contactedByOwner[owner]; continue; }
+    const cur = MANUAL.contactedByOwner[owner] || { count: 0, last: "" };
+    cur.count = (cur.count || 0) + 1;
+    cur.last = stamp;
+    MANUAL.contactedByOwner[owner] = cur;
+  }
+  saveManual();
+  refresh().then(autosave);
+}
+function updateSelectBar() {
+  const bar = document.getElementById("selectBar");
+  if (!bar) return;
+  bar.classList.toggle("show", SELECTED_OWNERS.size > 0);
+  document.getElementById("selectCount").textContent =
+    SELECTED_OWNERS.size + " owner" + (SELECTED_OWNERS.size === 1 ? "" : "s") + " selected";
+}
+// Per-row pill click → single-owner increment / shift-click reset.
+document.addEventListener("click", e => {
+  const pill = e.target.closest("[data-contact-owner]");
+  if (!pill) return;
+  e.preventDefault();
+  bumpContacted([pill.dataset.contactOwner], e.shiftKey);
+  toast(e.shiftKey ? "Reset contact count." : "Logged a contact.");
+});
+// Row checkbox → toggle selection. Use change so spacebar/touch also work.
+document.addEventListener("change", e => {
+  const cb = e.target.closest("[data-select-owner]");
+  if (!cb) return;
+  const owner = cb.dataset.selectOwner;
+  if (cb.checked) SELECTED_OWNERS.add(owner); else SELECTED_OWNERS.delete(owner);
+  cb.closest("tr")?.classList.toggle("selected", cb.checked);
+  updateSelectBar();
+});
+document.getElementById("markContactedBtn").addEventListener("click", () => {
+  if (!SELECTED_OWNERS.size) return;
+  const n = SELECTED_OWNERS.size;
+  bumpContacted([...SELECTED_OWNERS], false);
+  SELECTED_OWNERS.clear();
+  updateSelectBar();
+  toast(`Logged a contact for ${n} owner${n === 1 ? "" : "s"}.`);
+});
+document.getElementById("clearSelectionBtn").addEventListener("click", () => {
+  SELECTED_OWNERS.clear();
+  document.querySelectorAll('input[data-select-owner]:checked').forEach(cb => cb.checked = false);
+  document.querySelectorAll('tr.selected').forEach(tr => tr.classList.remove("selected"));
+  updateSelectBar();
+});
+
 /* Global search — address / owner / enquirer name */
 function runSearch(q) {
   const panel = document.getElementById("panel-search");
@@ -2736,7 +2837,11 @@ function applyLoadedExtras(config, decisions, manual, managed) {
     saveDecisions();
   }
   if (manual) {
-    MANUAL = { postalByOwner: manual.postalByOwner || {}, notesByOwner: manual.notesByOwner || {} };
+    MANUAL = {
+      postalByOwner: manual.postalByOwner || {},
+      notesByOwner: manual.notesByOwner || {},
+      contactedByOwner: manual.contactedByOwner || {}
+    };
     saveManual();
   }
   if (managed) {
