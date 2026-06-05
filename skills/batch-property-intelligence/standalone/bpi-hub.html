@@ -73,6 +73,9 @@
   .selectbar button { background: var(--muted-gold); color: var(--elite-black); border: 0; padding: 7px 12px; border-radius: 4px; font-weight: 700; cursor: pointer; }
   .selectbar button.ghost { background: transparent; color: var(--warm-white); border: 1px solid var(--warm-white); }
   td.selcell { width: 26px; text-align: center; padding: 4px; }
+  th[data-sort] { cursor: pointer; user-select: none; }
+  th[data-sort]:hover { background: #1f1f1f; }
+  th[data-sort].sorted { background: var(--muted-gold); color: var(--elite-black); }
   tr.selected { background: rgba(180, 150, 80, 0.18); }
   tr.selected td { font-weight: 600; }
   tr.dnc-row td { color: #c62828; }
@@ -214,7 +217,7 @@
     <h1>BATCH INTELLIGENCE HUB</h1>
     <div class="sub">Elite Lifestyle Properties — browser edition</div>
   </div>
-  <div class="sub" id="versionTag">V4.2 · 4 June 2026 · runs entirely on your machine · no data leaves the browser</div>
+  <div class="sub" id="versionTag">V4.3 · 4 June 2026 · runs entirely on your machine · no data leaves the browser</div>
 </header>
 
 <div class="wrap">
@@ -1424,6 +1427,24 @@ let DATASET = [];   // last recompute result (scored parcels)
 let WARM = [];      // current SC owners who enquired (warm sellers)
 let HOLDING = [];   // enquirers not yet confirmed as SC owners (pending RP Data)
 let ALL_CONTACTS = [];   // last-loaded enquiry contacts (for chart + analytics)
+// Per-table sort state. Click a header to change.
+let HOLDING_SORT = { key: "enquiryCount", dir: "desc" };
+let WARM_SORT    = { key: "combinedScore", dir: "desc" };
+function sortRows(rows, key, dir) {
+  const mult = dir === "asc" ? 1 : -1;
+  return rows.slice().sort((a, b) => {
+    const va = a[key], vb = b[key];
+    const na = va == null || va === "", nb = vb == null || vb === "";
+    if (na && nb) return 0;
+    if (na) return 1;
+    if (nb) return -1;
+    if (typeof va === "number" && typeof vb === "number") return (va - vb) * mult;
+    if (typeof va === "boolean" || typeof vb === "boolean") return ((va === true ? 1 : 0) - (vb === true ? 1 : 0)) * mult;
+    return String(va).localeCompare(String(vb)) * mult;
+  });
+}
+function sortClass(state, key) { return state.key === key ? "sorted" : ""; }
+function arrowFor(state, key)  { return state.key === key ? (state.dir === "asc" ? " ▲" : " ▼") : ""; }
 
 const MAP_FIELDS = [
   ["name", "Name"], ["first", "First name"], ["last", "Last name"],
@@ -1946,6 +1967,8 @@ function managedTable(rows) {
 }
 function warmTable(rows) {
   if (!rows.length) return `<div class="empty">No warm sellers yet. A warm seller is a LockedOn enquirer who <b>also owns a current Sunshine Coast property</b> in your database. Load the RP Data export(s) for the suburbs where your enquirers own, then drop your LockedOn enquiry CSV.</div>`;
+  rows = sortRows(rows, WARM_SORT.key, WARM_SORT.dir);
+  const s = WARM_SORT;
   const body = rows.map(p => {
     const inv = p.enquiryPotentialInvestor === "Y" ? `<span class="pill-inv" title="Notes mentioned 'invest'">INV</span>` : "";
     const dnc = p.enquiryDoNotContact || p.enquiryDoNotCall || p.enquiryDoNotEmail;
@@ -1980,7 +2003,23 @@ function warmTable(rows) {
     </tr>`;
   }).join("");
   return `<div class="table-scroll"><table>
-    <thead><tr><th></th><th>Score</th><th>Warm</th><th>Enquirer</th><th>Enq #</th><th>Enquiry Date</th><th>Enquired On</th><th>Buyer $$$</th><th>Bracket</th><th>Active Buyer</th><th>Owner (database)</th><th>SC Property Owned</th><th>Suburb</th><th>Props</th><th>Seller</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
+    <thead><tr>
+      <th></th>
+      <th data-table="warm" data-sort="combinedScore" class="${sortClass(s,'combinedScore')}">Score${arrowFor(s,'combinedScore')}</th>
+      <th>Warm</th>
+      <th data-table="warm" data-sort="enquiryContact" class="${sortClass(s,'enquiryContact')}">Enquirer${arrowFor(s,'enquiryContact')}</th>
+      <th data-table="warm" data-sort="enquiryCount" class="${sortClass(s,'enquiryCount')}">Enq #${arrowFor(s,'enquiryCount')}</th>
+      <th data-table="warm" data-sort="enquiryDateMs" class="${sortClass(s,'enquiryDateMs')}">Enquiry Date${arrowFor(s,'enquiryDateMs')}</th>
+      <th>Enquired On</th>
+      <th data-table="warm" data-sort="enquiryInterestPrice" class="${sortClass(s,'enquiryInterestPrice')}">Buyer $$$${arrowFor(s,'enquiryInterestPrice')}</th>
+      <th data-table="warm" data-sort="enquiryInterestBracket" class="${sortClass(s,'enquiryInterestBracket')}">Bracket${arrowFor(s,'enquiryInterestBracket')}</th>
+      <th>Active Buyer</th>
+      <th data-table="warm" data-sort="owner1" class="${sortClass(s,'owner1')}">Owner (database)${arrowFor(s,'owner1')}</th>
+      <th data-table="warm" data-sort="fullAddress" class="${sortClass(s,'fullAddress')}">SC Property Owned${arrowFor(s,'fullAddress')}</th>
+      <th data-table="warm" data-sort="suburbName" class="${sortClass(s,'suburbName')}">Suburb${arrowFor(s,'suburbName')}</th>
+      <th data-table="warm" data-sort="ownerPropertyCount" class="${sortClass(s,'ownerPropertyCount')}">Props${arrowFor(s,'ownerPropertyCount')}</th>
+      <th>Seller</th><th>Owner Type</th><th>Recommended Action</th>
+    </tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 function reviewTable(rows) {
@@ -2033,6 +2072,8 @@ function dncPill(c) {
 }
 function holdingTable(rows) {
   if (!rows.length) return `<div class="empty">Nothing in holding. Enquirers who aren't yet confirmed as current Sunshine Coast owners land here — ready to cross-check against RP Data when you get a chance.</div>`;
+  rows = sortRows(rows, HOLDING_SORT.key, HOLDING_SORT.dir);
+  const s = HOLDING_SORT;
   const body = rows.map(c => {
     const dnc = dncFlags(c).length > 0;
     return `
@@ -2053,7 +2094,19 @@ function holdingTable(rows) {
   }).join("");
   return `<div class="filterbar"><span class="muted">Enquirers not yet matched to an SC property. Pull their RP Data, drop the suburb export in, and any who own on the Coast will move to Warm Sellers automatically. <b>INV</b> = "invest" found in notes. <span style="color:#c62828;">Red rows</span> = do-not-call / do-not-email / do-not-contact flagged in the source CSV — do not outreach.</span></div>
     <div class="table-scroll"><table>
-    <thead><tr><th>Name</th><th>Enq #</th><th>Enquiry Date</th><th>Phone</th><th>Email</th><th>Active Buyer</th><th>Property Enquired On</th><th>Buyer $$$</th><th>Buyer Bracket</th><th>Potential Investor</th><th>Lead Source</th><th>Source File</th></tr></thead>
+    <thead><tr>
+      <th data-table="holding" data-sort="name" class="${sortClass(s,'name')}">Name${arrowFor(s,'name')}</th>
+      <th data-table="holding" data-sort="enquiryCount" class="${sortClass(s,'enquiryCount')}">Enq #${arrowFor(s,'enquiryCount')}</th>
+      <th data-table="holding" data-sort="enquiryDateMs" class="${sortClass(s,'enquiryDateMs')}">Enquiry Date${arrowFor(s,'enquiryDateMs')}</th>
+      <th>Phone</th><th>Email</th>
+      <th data-table="holding" data-sort="activeBuyer" class="${sortClass(s,'activeBuyer')}">Active Buyer${arrowFor(s,'activeBuyer')}</th>
+      <th data-table="holding" data-sort="interest" class="${sortClass(s,'interest')}">Property Enquired On${arrowFor(s,'interest')}</th>
+      <th data-table="holding" data-sort="interestPrice" class="${sortClass(s,'interestPrice')}">Buyer $$$${arrowFor(s,'interestPrice')}</th>
+      <th data-table="holding" data-sort="interestPriceBracket" class="${sortClass(s,'interestPriceBracket')}">Buyer Bracket${arrowFor(s,'interestPriceBracket')}</th>
+      <th data-table="holding" data-sort="potentialInvestor" class="${sortClass(s,'potentialInvestor')}">Potential Investor${arrowFor(s,'potentialInvestor')}</th>
+      <th data-table="holding" data-sort="contactType" class="${sortClass(s,'contactType')}">Lead Source${arrowFor(s,'contactType')}</th>
+      <th>Source File</th>
+    </tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 
@@ -2712,6 +2765,17 @@ document.addEventListener("change", e => {
   if (cb.checked) SELECTED_OWNERS.add(owner); else SELECTED_OWNERS.delete(owner);
   cb.closest("tr")?.classList.toggle("selected", cb.checked);
   updateSelectBar();
+});
+// Click a sortable header → cycle key + direction and re-render that panel only.
+document.addEventListener("click", e => {
+  const th = e.target.closest("th[data-table][data-sort]");
+  if (!th) return;
+  const tbl = th.dataset.table, key = th.dataset.sort;
+  const state = tbl === "warm" ? WARM_SORT : HOLDING_SORT;
+  if (state.key === key) state.dir = state.dir === "asc" ? "desc" : "asc";
+  else { state.key = key; state.dir = key === "name" ? "asc" : "desc"; }
+  if (tbl === "warm") document.getElementById("panel-warm").innerHTML = warmTable(WARM);
+  else document.getElementById("panel-holding").innerHTML = holdingTable(HOLDING);
 });
 document.getElementById("markContactedBtn").addEventListener("click", () => {
   if (!SELECTED_OWNERS.size) return;

@@ -1,5 +1,20 @@
-BATCH INTELLIGENCE HUB — Browser Edition  (V4.0)
+BATCH INTELLIGENCE HUB — Browser Edition  (V4.3)
 Elite Lifestyle Properties
+
+V4.3 — Holding and Warm Sellers column headers are now click-to-
+sort (click again to reverse). Tap "Enq #" to put your hottest
+repeat enquirers up top, or any other column. Active sort key
+is highlighted gold with an arrow.
+
+V4.2 — Summary tab gains an Enquiry Momentum bar chart showing
+the last 18 months of enquiry volume (inline SVG, no deps).
+
+V4.1 — Each owner row carries a clickable "✓ N" outreach
+counter. Click to log one contact, shift-click to reset; tick
+multiple rows and use the sticky "Mark contacted" bar to bump
+many at once. Persists per-owner in the OneDrive memory file.
+"Contacted #" + "Last Contacted" added to CSV / workbook
+exports.
 
 V4.0 — Two new things in the export bar:
 - "Buyer $$$" dropdown (Any / <$500k / $500k–$1M / $1M–$2M /
