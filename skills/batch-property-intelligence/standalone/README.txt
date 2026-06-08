@@ -1,5 +1,46 @@
-BATCH INTELLIGENCE HUB — Browser Edition  (V4.3)
+BATCH INTELLIGENCE HUB — Browser Edition  (V4.4)
 Elite Lifestyle Properties
+
+V4.4 — Three additions:
+
+1. INSPECTION SCREENSHOT MATCH. New "Match Inspection List…"
+   button in the import toolbar. Tap it at an open home, pick the
+   screenshot from your phone of the agent-list software, long-
+   press the names in the preview (iOS Live Text) → Copy → paste
+   into the textarea, hit "Match & save". Every line runs
+   through the existing owner-matching engine. Strong matches
+   (first-name + surname agreement) earn a +3 score boost
+   ("attended open home") on every parcel that owner holds in
+   your database — a confirmed in-person attendee is a stronger
+   signal than a remote enquirer. History lives in a new
+   "Inspections" tab next to Warm Sellers; each event is
+   expandable with attendee→owner rows.
+
+2. PASSCODE GATE. The app now boots behind a 4-digit code
+   (default 4551). The hash is in localStorage; entering the
+   code unlocks the session (kept in sessionStorage so a reload
+   in the same tab stays unlocked). Change the code in Scoring
+   Settings → Passcode. A "🔒 Lock now" button on the memory
+   toolbar re-locks immediately. SOFT GATE ONLY — this is a
+   single-file HTML, so anyone willing to open DevTools can
+   bypass it. It keeps casual eyes off the data; it does NOT
+   encrypt anything. If you need real protection ask for AES-GCM
+   encryption of the memory file as a follow-up.
+
+3. RULE TWEAKS (configurable in settings):
+   - Lease-expiry boost: a managed property whose tenancy ends
+     in ≤90 days gives the owner +1 (vendors often think about
+     selling when the lease is up). Set days to 0 to disable.
+   - Active-buyer × warm-seller dual boost: warm sellers whose
+     enquiry is flagged as an Active Buyer get +1 — they're
+     actively shopping for an upgrade.
+   - Inspection boost (above): +3 stackable.
+   All three stack with warm (+2), managed (+5), and repeat-
+   enquirer (+1/+2), still capped at score 20.
+
+Memory-file payload version bumps to v6 (with new "inspections"
+key). Loading an older v5 file works — inspections default to
+empty.
 
 V4.3 — Holding and Warm Sellers column headers are now click-to-
 sort (click again to reverse). Tap "Enq #" to put your hottest

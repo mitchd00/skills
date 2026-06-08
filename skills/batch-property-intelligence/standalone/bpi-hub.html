@@ -217,8 +217,20 @@
     <h1>BATCH INTELLIGENCE HUB</h1>
     <div class="sub">Elite Lifestyle Properties — browser edition</div>
   </div>
-  <div class="sub" id="versionTag">V4.3 · 4 June 2026 · runs entirely on your machine · no data leaves the browser</div>
+  <div class="sub" id="versionTag">V4.4 · 8 June 2026 · runs entirely on your machine · no data leaves the browser</div>
 </header>
+
+<div id="lockShield" style="position:fixed;inset:0;background:var(--elite-black);color:var(--warm-white);z-index:9999;display:flex;align-items:center;justify-content:center;">
+  <div style="text-align:center;max-width:320px;padding:24px;">
+    <h2 style="letter-spacing:2px;font-size:18px;margin:0 0 6px;">BATCH INTELLIGENCE HUB</h2>
+    <p style="color:var(--muted-gold);font-size:12px;font-style:italic;margin:0 0 24px;">Elite Lifestyle Properties</p>
+    <p style="font-size:13px;margin:0 0 12px;">Enter passcode</p>
+    <input id="lockCode" type="password" inputmode="numeric" pattern="\d*" autocomplete="off" maxlength="12" style="font-size:24px;letter-spacing:8px;text-align:center;padding:10px;width:180px;border:1px solid var(--muted-gold);background:transparent;color:var(--warm-white);border-radius:6px;">
+    <div id="lockErr" style="color:#ef6c00;font-size:12px;height:16px;margin-top:8px;"></div>
+    <button id="lockSubmit" style="margin-top:8px;background:var(--muted-gold);color:var(--elite-black);border:0;padding:10px 20px;font-weight:700;border-radius:4px;width:180px;cursor:pointer;font-family:inherit;">Unlock</button>
+    <p style="font-size:11px;color:#7a6a44;margin:20px 0 0;line-height:1.4;">Soft gate — single-file HTML. Anyone with DevTools can bypass. Not a substitute for real secret protection.</p>
+  </div>
+</div>
 
 <div class="wrap">
 
@@ -243,6 +255,7 @@
     <input type="file" id="managedInput" hidden>
     <button id="pickEnrichBtn">Update postal/notes from sheet…</button>
     <input type="file" id="enrichInput" hidden>
+    <button id="matchInspectionBtn">Match Inspection List…</button>
     <button class="danger" id="clearBtn">Clear database</button>
     <div class="dbstat" id="dbstat">Database empty</div>
   </div>
@@ -283,6 +296,7 @@
     <button id="saveCopyBtn">Save a copy…</button>
     <button id="loadCopyBtn">Load a copy…</button>
     <input type="file" id="loadCopyInput" accept=".json,application/json" hidden>
+    <button id="lockNowBtn">🔒 Lock now</button>
   </div>
 
   <details class="settings">
@@ -297,6 +311,12 @@
         <input type="number" id="cfgRecent">
         <label style="margin-top:10px;">Enquiry window (months) — LockedOn match = warm seller boost</label>
         <input type="number" id="cfgEnquiryWindow">
+        <label style="margin-top:10px;">Inspection attendee boost (open-home → +N on score)</label>
+        <input type="number" id="cfgInspBoost">
+        <label style="margin-top:10px;">Lease-expiry seller-signal window (days, 0 = off)</label>
+        <input type="number" id="cfgLeaseDays">
+        <label style="margin-top:10px;">Active-buyer + warm-seller dual boost</label>
+        <input type="number" id="cfgActiveBuyer">
       </div>
       <div>
         <label>Entity name patterns (one per line)</label>
@@ -315,6 +335,15 @@
       <button class="primary" id="applyCfgBtn">Apply &amp; recompute</button>
       <button id="resetCfgBtn">Reset to defaults</button>
     </div>
+    <h3 style="margin:14px 0 6px;color:var(--elite-black);font-size:13px;letter-spacing:1px;">PASSCODE (SOFT GATE)</h3>
+    <p class="muted" style="margin:0 0 8px;">Default <b>4551</b>. Hashed (SHA-256) in localStorage. Soft gate only — single-file HTML, DevTools-bypassable. <i>Not</i> a substitute for real secret protection.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:end;padding-bottom:8px;">
+      <div><label style="font-size:12px;font-weight:600;">Current code</label><input type="password" inputmode="numeric" id="cfgOldCode" style="width:100%;padding:6px;border:1px solid var(--line);border-radius:4px;"></div>
+      <div><label style="font-size:12px;font-weight:600;">New code (≥4 digits)</label><input type="password" inputmode="numeric" id="cfgNewCode" style="width:100%;padding:6px;border:1px solid var(--line);border-radius:4px;"></div>
+      <div><label style="font-size:12px;font-weight:600;">Confirm new</label><input type="password" inputmode="numeric" id="cfgNewCode2" style="width:100%;padding:6px;border:1px solid var(--line);border-radius:4px;"></div>
+      <button id="savePasscodeBtn">Save passcode</button>
+    </div>
+
     <h3 style="margin:8px 0;color:var(--elite-black);font-size:13px;letter-spacing:1px;">PROPERTY MANAGER → PORTFOLIO MAPPING</h3>
     <p class="muted" style="margin:0 0 8px;">When you upload an Owner export, the picker pre-fills the portfolio based on the file's Property Manager. Adjust here and save — changes apply on the next upload and are persisted in your OneDrive memory file.</p>
     <div id="pmMapRows"></div>
@@ -337,6 +366,7 @@
       <button class="tab" data-tab="portfolios">Portfolios <span class="count" id="cnt-portfolios"></span></button>
       <button class="tab" data-tab="rentals">Rentals <span class="count" id="cnt-rentals"></span></button>
       <button class="tab" data-tab="warm">Warm Sellers <span class="count" id="cnt-warm"></span></button>
+      <button class="tab" data-tab="inspections">Inspections <span class="count" id="cnt-inspections"></span></button>
       <button class="tab" data-tab="managed">Under Management <span class="count" id="cnt-managed"></span></button>
       <button class="tab" data-tab="review">Review Matches <span class="count" id="cnt-review"></span></button>
       <button class="tab" data-tab="holding">Holding · Pending RP Data <span class="count" id="cnt-holding"></span></button>
@@ -349,6 +379,7 @@
     <div class="panel" id="panel-portfolios"></div>
     <div class="panel" id="panel-rentals"></div>
     <div class="panel" id="panel-warm"></div>
+    <div class="panel" id="panel-inspections"></div>
     <div class="panel" id="panel-managed"></div>
     <div class="panel" id="panel-review"></div>
     <div class="panel" id="panel-holding"></div>
@@ -371,6 +402,36 @@
     <div class="modal-actions">
       <button class="primary" id="mapImport">Import with these columns</button>
       <button id="mapCancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="inspectionModal">
+  <div class="modal" style="max-width:540px;">
+    <h3>Match inspection list</h3>
+    <p class="muted" style="margin:0 0 12px;">Pick the screenshot from your phone, long-press the names in the preview (iOS Live Text) → copy → paste into the box. Or type/paste names directly — one per line.</p>
+    <div style="margin:8px 0;">
+      <label style="font-weight:600;font-size:13px;display:block;">Property (optional)</label>
+      <input type="text" id="inspProperty" placeholder="e.g. 9 Adaluma Av, Buddina" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:4px;margin-top:4px;">
+    </div>
+    <div style="margin:8px 0;">
+      <label style="font-weight:600;font-size:13px;display:block;">Date</label>
+      <input type="datetime-local" id="inspDate" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:4px;margin-top:4px;">
+    </div>
+    <div style="margin:8px 0;">
+      <label style="font-weight:600;font-size:13px;display:block;">Screenshot (optional — for Live Text copy)</label>
+      <input type="file" accept="image/*" id="inspImage" style="display:block;margin-top:4px;">
+      <img id="inspPreview" style="display:none;max-width:100%;max-height:240px;margin-top:8px;border:1px solid var(--line);border-radius:4px;">
+    </div>
+    <div style="margin:8px 0;">
+      <label style="font-weight:600;font-size:13px;display:block;">Attendees (one per line)</label>
+      <textarea id="inspNames" rows="6" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:4px;font-family:inherit;font-size:14px;margin-top:4px;" placeholder="John Smith&#10;Jane Brown&#10;..."></textarea>
+    </div>
+    <div id="inspPreviewResults" style="margin:8px 0;"></div>
+    <div class="modal-actions">
+      <button class="primary" id="inspMatchBtn">Match &amp; save</button>
+      <button id="inspPreviewBtn">Preview matches</button>
+      <button id="inspCancelBtn">Cancel</button>
     </div>
   </div>
 </div>
@@ -399,6 +460,10 @@ const DEFAULT_CONFIG = {
   enquiry_window_months: 6,
   enquiry_boost: 2,
   managed_boost: 5,
+  inspection_boost: 3,
+  lease_expiry_seller_boost_days: 90,
+  lease_expiry_boost: 1,
+  active_buyer_warm_boost: 1,
   score_cap: 20,
   entity_patterns: [
     "PTY LTD","PTY. LTD","LIMITED"," LTD","TRUST","SUPER","SUPERANNUATION","SMSF",
@@ -899,6 +964,14 @@ function loadManaged() {
 }
 function saveManaged() { localStorage.setItem("bpi_managed", JSON.stringify(MANAGED)); }
 let MANAGED = loadManaged();
+
+/* Inspection history — open-home attendee screenshots paired with strong-match results. */
+function loadInspections() {
+  try { return JSON.parse(localStorage.getItem("bpi_inspections") || "[]"); }
+  catch (e) { return []; }
+}
+function saveInspections() { localStorage.setItem("bpi_inspections", JSON.stringify(INSPECTIONS)); }
+let INSPECTIONS = loadInspections();
 function applyManaged(parcels) {
   for (const p of parcels) {
     p.underManagement = false;
@@ -970,6 +1043,85 @@ function tierLabel(score) {
   if (score > 15) return "FLAMING HOT";
   if (score > 10) return "HOT";
   return "";
+}
+
+// V4.4 — Owners flagged in any saved inspection get a stronger-than-enquiry
+// boost: they physically attended an open home for one of our listings.
+function applyInspectionBoost(parcels) {
+  const boost = CONFIG.inspection_boost || 0;
+  if (!boost || !INSPECTIONS.length) return;
+  const cap = CONFIG.score_cap || 20;
+  const ownersBoosted = new Set();
+  for (const ev of INSPECTIONS) {
+    for (const m of (ev.matches || [])) {
+      if (m.tier === "strong" && m.owner) ownersBoosted.add(m.owner);
+    }
+  }
+  if (!ownersBoosted.size) return;
+  for (const p of parcels) {
+    if (p.nonSaleable || !ownersBoosted.has(p.owner1)) continue;
+    const before = p.combinedScore;
+    p.combinedScore = Math.min(cap, p.combinedScore + boost);
+    p.inspectionBoost = p.combinedScore - before;
+    p.attendedInspection = true;
+    if (p.inspectionBoost > 0) {
+      p.recommendedAction = (p.recommendedAction || "") + ` — attended open home.`;
+    }
+  }
+}
+
+// V4.4 — Lease end soon on a managed property = vendor often thinks about
+// selling. Parses a date out of the tenancy field; +N if within window.
+function parseDateLoose(s) {
+  if (!s) return null;
+  const t = String(s).trim();
+  let m = t.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3]).getTime();
+  m = t.match(/(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})/);
+  if (m) {
+    let y = +m[3]; if (y < 100) y += 2000;
+    return new Date(y, +m[2] - 1, +m[1]).getTime();
+  }
+  return null;
+}
+function applyLeaseExpiryBoost(parcels) {
+  const days = CONFIG.lease_expiry_seller_boost_days || 0;
+  const boost = CONFIG.lease_expiry_boost || 0;
+  if (!days || !boost) return;
+  const cap = CONFIG.score_cap || 20;
+  const cutoff = days * 864e5;
+  const now = Date.now();
+  for (const p of parcels) {
+    if (p.nonSaleable || !p.managedHere) continue;
+    const ms = parseDateLoose(p.managedTenancy);
+    if (!ms) continue;
+    const delta = ms - now;
+    if (delta < 0 || delta > cutoff) continue;
+    const before = p.combinedScore;
+    p.combinedScore = Math.min(cap, p.combinedScore + boost);
+    p.leaseExpiryBoost = p.combinedScore - before;
+    if (p.leaseExpiryBoost > 0) {
+      const daysLeft = Math.max(0, Math.round(delta / 864e5));
+      p.recommendedAction = (p.recommendedAction || "") + ` — lease ends ${daysLeft}d.`;
+    }
+  }
+}
+
+// V4.4 — Active-buyer flag + warm-seller = actively shopping for an upgrade.
+function applyActiveBuyerWarmBoost(parcels) {
+  const boost = CONFIG.active_buyer_warm_boost || 0;
+  if (!boost) return;
+  const cap = CONFIG.score_cap || 20;
+  for (const p of parcels) {
+    if (p.nonSaleable || !p.warmSeller) continue;
+    if (p.enquiryActiveBuyer !== "Y") continue;
+    const before = p.combinedScore;
+    p.combinedScore = Math.min(cap, p.combinedScore + boost);
+    p.activeBuyerWarmBoost = p.combinedScore - before;
+    if (p.activeBuyerWarmBoost > 0) {
+      p.recommendedAction = (p.recommendedAction || "") + ` — active buyer.`;
+    }
+  }
 }
 
 /* Price helpers — tag each enquiry with the price of the property enquired on. */
@@ -1230,6 +1382,54 @@ function computeHolding(contacts, parcels) {
     ((b.enquiryDateMs || 0) - (a.enquiryDateMs || 0)));
 }
 
+// V4.4 — Take a free-text list of attendee names and run each line through
+// the owner-matching engine. No image OCR — agent pastes names from iOS Live
+// Text (long-press in Photos / Files preview → Copy).
+function matchInspectionText(text) {
+  if (!DATASET.length) return [];
+  const lines = String(text || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const index = buildOwnerIndex(DATASET);
+  // Pre-bucket parcels by owner for cheap best-score lookup.
+  const bestByOwner = new Map();
+  for (const p of DATASET) {
+    if (!p.inSC || p.nonSaleable) continue;
+    const cur = bestByOwner.get(p.owner1);
+    if (!cur || p.combinedScore > cur.combinedScore) bestByOwner.set(p.owner1, p);
+  }
+  const out = [];
+  for (const line of lines) {
+    const fakeContact = { name: line, tokens: Array.from(nameTokens(line)) };
+    const matches = classifyContactMatches(fakeContact, index);
+    if (!matches.length) {
+      out.push({ name: line, tier: "none", owner: null, ownedAddress: "", combinedScore: 0 });
+      continue;
+    }
+    const strong = matches.find(m => m.tier === "strong");
+    const m = strong || matches[0];
+    const best = bestByOwner.get(m.name);
+    out.push({
+      name: line,
+      tier: m.tier,
+      owner: m.name,
+      ownedAddress: best ? best.fullAddress : "",
+      combinedScore: best ? best.combinedScore : 0
+    });
+  }
+  return out;
+}
+
+function saveInspection(property, dateIso, attendeesText) {
+  const attendees = attendeesText.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const matches = matchInspectionText(attendeesText);
+  INSPECTIONS.unshift({
+    date: dateIso || new Date().toISOString(),
+    property: property || "",
+    attendees, matches
+  });
+  saveInspections();
+  return INSPECTIONS[0];
+}
+
 // Full recompute across all stored sale records → array of scored current-owner parcels.
 function recompute(allSales, contacts = []) {
   const scSet = new Set(CONFIG.sc_postcodes.map(Number));
@@ -1307,6 +1507,9 @@ function recompute(allSales, contacts = []) {
   applyEnquiryData(parcels, contacts);
   applyManagedBoost(parcels);
   applyRepeatEnquiryBoost(parcels);
+  applyInspectionBoost(parcels);
+  applyLeaseExpiryBoost(parcels);
+  applyActiveBuyerWarmBoost(parcels);
   for (const p of parcels) p.tier = tierLabel(p.combinedScore);
   return parcels;
 }
@@ -1792,6 +1995,7 @@ function renderDashboard() {
   setCount("portfolios", portfolios.length);
   setCount("rentals", rentals.length);
   setCount("warm", WARM.length);
+  setCount("inspections", INSPECTIONS.length);
   setCount("managed", managedRows.length);
   setCount("review", REVIEW.length);
   setCount("holding", HOLDING.length);
@@ -1817,6 +2021,7 @@ function renderDashboard() {
   document.getElementById("panel-filtered").innerHTML = filteredTable(filtered);
   document.getElementById("panel-portfolios").innerHTML = portfolioTable(portfolios);
   document.getElementById("panel-warm").innerHTML = warmTable(WARM);
+  document.getElementById("panel-inspections").innerHTML = inspectionsPanel();
   document.getElementById("panel-managed").innerHTML = managedTable(DATASET.filter(p => p.managedHere).sort((a, b) => b.combinedScore - a.combinedScore));
   document.getElementById("panel-review").innerHTML = reviewTable(REVIEW);
   document.getElementById("panel-holding").innerHTML = holdingTable(HOLDING);
@@ -2022,6 +2227,40 @@ function warmTable(rows) {
     </tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
+function inspectionsPanel() {
+  if (!INSPECTIONS.length) {
+    return `<div class="empty"><p>No inspections saved yet.</p><p class="muted">Use the <b>Match Inspection List…</b> button at the top to capture an open-home attendee list (paste from an iPhone screenshot via Live Text) and match it against your database. Strong matches give the owner a +${CONFIG.inspection_boost || 3} score boost.</p></div>`;
+  }
+  return INSPECTIONS.map((ev, i) => {
+    const strong = (ev.matches || []).filter(m => m.tier === "strong").length;
+    const maybe = (ev.matches || []).filter(m => m.tier === "uncertain").length;
+    const date = ev.date ? new Date(ev.date).toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short" }) : "(no date)";
+    const rows = (ev.matches || []).map(m => {
+      const cls = m.tier === "strong" ? "HIGH" : m.tier === "uncertain" ? "MEDIUM" : "NO";
+      const label = m.tier === "strong" ? "MATCH" : m.tier === "uncertain" ? "MAYBE" : "no match";
+      return `<tr>
+        <td>${esc(m.name)}</td>
+        <td><span class="grade ${cls}">${label}</span></td>
+        <td>${esc(m.owner || "")}</td>
+        <td>${esc(m.ownedAddress || "")}</td>
+        <td class="score">${m.combinedScore || ""}</td>
+      </tr>`;
+    }).join("");
+    return `<div style="background:#fff;border:1px solid var(--line);border-radius:6px;padding:14px;margin:12px 0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+        <div><b>${esc(ev.property || "(no property recorded)")}</b> <span class="muted">· ${esc(date)}</span></div>
+        <div class="muted">${ev.attendees.length} attendee${ev.attendees.length === 1 ? "" : "s"} · ${strong} strong · ${maybe} maybe
+          <button data-del-inspection="${i}" class="danger" style="font-size:11px;padding:4px 8px;margin-left:8px;">Delete</button>
+        </div>
+      </div>
+      <div class="table-scroll" style="margin-top:10px;max-height:none;">
+        <table><thead><tr><th>Attendee (as listed)</th><th>Match</th><th>Owner (database)</th><th>SC property owned</th><th>Score</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+      </div>
+    </div>`;
+  }).join("");
+}
+
 function reviewTable(rows) {
   if (!rows.length) return `<div class="empty">No matches to review. Ambiguous enquirer→owner matches (shared surname only, or one enquirer hitting several owners) appear here for you to approve or reject.</div>`;
   const body = rows.map((e, i) => {
@@ -2833,6 +3072,9 @@ function fillSettings() {
   document.getElementById("cfgLongHeld").value = CONFIG.long_held_years;
   document.getElementById("cfgRecent").value = CONFIG.recent_purchase_years;
   document.getElementById("cfgEnquiryWindow").value = CONFIG.enquiry_window_months;
+  document.getElementById("cfgInspBoost").value = CONFIG.inspection_boost ?? 3;
+  document.getElementById("cfgLeaseDays").value = CONFIG.lease_expiry_seller_boost_days ?? 90;
+  document.getElementById("cfgActiveBuyer").value = CONFIG.active_buyer_warm_boost ?? 1;
   document.getElementById("cfgEntity").value = CONFIG.entity_patterns.join("\n");
   document.getElementById("cfgNonSaleable").value = CONFIG.non_saleable_patterns.join("\n");
   document.getElementById("cfgLandUse").value = CONFIG.non_saleable_land_uses.join("\n");
@@ -2887,6 +3129,9 @@ document.getElementById("applyCfgBtn").addEventListener("click", async () => {
   CONFIG.long_held_years = parseFloat(document.getElementById("cfgLongHeld").value) || 15;
   CONFIG.recent_purchase_years = parseFloat(document.getElementById("cfgRecent").value) || 5;
   CONFIG.enquiry_window_months = parseFloat(document.getElementById("cfgEnquiryWindow").value) || 6;
+  const ib = parseInt(document.getElementById("cfgInspBoost").value, 10); CONFIG.inspection_boost = isNaN(ib) ? 3 : ib;
+  const ld = parseInt(document.getElementById("cfgLeaseDays").value, 10); CONFIG.lease_expiry_seller_boost_days = isNaN(ld) ? 90 : ld;
+  const ab = parseInt(document.getElementById("cfgActiveBuyer").value, 10); CONFIG.active_buyer_warm_boost = isNaN(ab) ? 1 : ab;
   CONFIG.entity_patterns = document.getElementById("cfgEntity").value.split("\n").map(s => s.trim()).filter(Boolean);
   CONFIG.non_saleable_patterns = document.getElementById("cfgNonSaleable").value.split("\n").map(s => s.trim()).filter(Boolean);
   CONFIG.non_saleable_land_uses = document.getElementById("cfgLandUse").value.split("\n").map(s => s.trim()).filter(Boolean);
@@ -2930,12 +3175,13 @@ async function buildPayload() {
   const contacts = await getAllContacts();
   const runs = await getRuns();
   return JSON.stringify({
-    app: "bpi", version: 5, exportedAt: new Date().toISOString(),
+    app: "bpi", version: 6, exportedAt: new Date().toISOString(),
     sales, contacts, runs,
     config: CONFIG,
     decisions: { approved: [...DECISIONS.approved], rejected: [...DECISIONS.rejected] },
     manual: MANUAL,
-    managed: MANAGED
+    managed: MANAGED,
+    inspections: INSPECTIONS
   });
 }
 async function writeDBFile(handle) {
@@ -2946,16 +3192,17 @@ async function writeDBFile(handle) {
 async function readDBFile(handle) {
   const file = await handle.getFile();
   const text = await file.text();
-  if (!text.trim()) return { sales: [], contacts: [], runs: { count: 0, files: [] }, config: null, decisions: null, manual: null, managed: null };
+  if (!text.trim()) return { sales: [], contacts: [], runs: { count: 0, files: [] }, config: null, decisions: null, manual: null, managed: null, inspections: null };
   const data = JSON.parse(text);
   return {
     sales: data.sales || [], contacts: data.contacts || [], runs: data.runs || { count: 0, files: [] },
     config: data.config || null, decisions: data.decisions || null,
-    manual: data.manual || null, managed: data.managed || null
+    manual: data.manual || null, managed: data.managed || null,
+    inspections: data.inspections || null
   };
 }
-// Apply config + match decisions + manual enrichment + managed list loaded from memory.
-function applyLoadedExtras(config, decisions, manual, managed) {
+// Apply config + match decisions + manual enrichment + managed list + inspections loaded from memory.
+function applyLoadedExtras(config, decisions, manual, managed, inspections) {
   if (decisions) {
     DECISIONS = { approved: new Set(decisions.approved || []), rejected: new Set(decisions.rejected || []) };
     saveDecisions();
@@ -2971,6 +3218,10 @@ function applyLoadedExtras(config, decisions, manual, managed) {
   if (managed) {
     MANAGED = { byOwner: managed.byOwner || {}, byAddressKey: managed.byAddressKey || {}, pmPortfolioMap: managed.pmPortfolioMap || {} };
     saveManaged();
+  }
+  if (Array.isArray(inspections)) {
+    INSPECTIONS = inspections;
+    saveInspections();
   }
   if (config) {
     CONFIG = Object.assign({}, DEFAULT_CONFIG, config);
@@ -3063,8 +3314,8 @@ async function reconnect() {
 }
 async function loadFromHandle(h) {
   try {
-    const { sales, contacts, runs, config, decisions, manual, managed } = await readDBFile(h);
-    applyLoadedExtras(config, decisions, manual, managed);
+    const { sales, contacts, runs, config, decisions, manual, managed, inspections } = await readDBFile(h);
+    applyLoadedExtras(config, decisions, manual, managed, inspections);
     await replaceAll(sales, contacts, runs);
     await refresh();
   } catch (e) {
@@ -3105,7 +3356,7 @@ function loadCopy() { document.getElementById("loadCopyInput").click(); }
 async function loadCopyFile(file) {
   try {
     const data = JSON.parse(await file.text());
-    applyLoadedExtras(data.config || null, data.decisions || null, data.manual || null, data.managed || null);
+    applyLoadedExtras(data.config || null, data.decisions || null, data.manual || null, data.managed || null, data.inspections || null);
     await replaceAll(data.sales || [], data.contacts || [], data.runs || { count: 0, files: [] });
     await refresh();
     await autosave();
@@ -3124,9 +3375,160 @@ document.getElementById("loadCopyInput").addEventListener("change", e => {
   e.target.value = "";
 });
 
+/* ───────────────────────── V4.4 — Passcode gate (soft) ───────────────────────── */
+
+const PASSCODE_KEY = "bpi_passcode_hash";
+const DEFAULT_PASSCODE = "4551";
+
+async function sha256Hex(text) {
+  const buf = new TextEncoder().encode(String(text));
+  const hash = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+async function getStoredPasscodeHash() {
+  let h = localStorage.getItem(PASSCODE_KEY);
+  if (!h) {
+    h = await sha256Hex(DEFAULT_PASSCODE);
+    localStorage.setItem(PASSCODE_KEY, h);
+  }
+  return h;
+}
+async function checkPasscode(code) {
+  return (await sha256Hex(code)) === (await getStoredPasscodeHash());
+}
+async function setPasscode(oldCode, newCode) {
+  if (!(await checkPasscode(oldCode))) return false;
+  const nc = String(newCode || "").trim();
+  if (!/^\d{4,}$/.test(nc)) return false;
+  localStorage.setItem(PASSCODE_KEY, await sha256Hex(nc));
+  return true;
+}
+function unlockGate() {
+  if (sessionStorage.getItem("bpi_unlocked") === "1") {
+    document.getElementById("lockShield").style.display = "none";
+    return Promise.resolve();
+  }
+  return new Promise(resolve => {
+    const shield = document.getElementById("lockShield");
+    const input = document.getElementById("lockCode");
+    const err = document.getElementById("lockErr");
+    const btn = document.getElementById("lockSubmit");
+    shield.style.display = "flex";
+    setTimeout(() => input.focus(), 50);
+    async function tryUnlock() {
+      err.textContent = "";
+      if (await checkPasscode(input.value)) {
+        sessionStorage.setItem("bpi_unlocked", "1");
+        shield.style.display = "none";
+        resolve();
+      } else {
+        err.textContent = "Incorrect.";
+        input.value = "";
+        input.focus();
+      }
+    }
+    btn.addEventListener("click", tryUnlock);
+    input.addEventListener("keydown", e => { if (e.key === "Enter") tryUnlock(); });
+  });
+}
+
+document.getElementById("lockNowBtn").addEventListener("click", () => {
+  sessionStorage.removeItem("bpi_unlocked");
+  location.reload();
+});
+document.getElementById("savePasscodeBtn").addEventListener("click", async () => {
+  const oldC = document.getElementById("cfgOldCode").value;
+  const newC = document.getElementById("cfgNewCode").value;
+  const newC2 = document.getElementById("cfgNewCode2").value;
+  if (newC !== newC2) { toast("New codes don't match."); return; }
+  if (!/^\d{4,}$/.test(newC)) { toast("New code must be at least 4 digits."); return; }
+  const ok = await setPasscode(oldC, newC);
+  if (!ok) { toast("Current code is wrong."); return; }
+  document.getElementById("cfgOldCode").value = "";
+  document.getElementById("cfgNewCode").value = "";
+  document.getElementById("cfgNewCode2").value = "";
+  toast("Passcode updated.");
+});
+
+/* ───────────────────────── V4.4 — Inspection list modal ───────────────────────── */
+
+function openInspectionModal() {
+  document.getElementById("inspectionModal").classList.add("show");
+  document.getElementById("inspProperty").value = "";
+  document.getElementById("inspNames").value = "";
+  document.getElementById("inspPreviewResults").innerHTML = "";
+  const preview = document.getElementById("inspPreview");
+  preview.src = ""; preview.style.display = "none";
+  document.getElementById("inspImage").value = "";
+  const d = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
+  document.getElementById("inspDate").value = d.toISOString().slice(0, 16);
+}
+function closeInspectionModal() {
+  document.getElementById("inspectionModal").classList.remove("show");
+}
+function renderInspPreview(matches) {
+  const host = document.getElementById("inspPreviewResults");
+  if (!matches.length) { host.innerHTML = ""; return; }
+  const rows = matches.map(m => {
+    const cls = m.tier === "strong" ? "HIGH" : m.tier === "uncertain" ? "MEDIUM" : "NO";
+    const lbl = m.tier === "strong" ? "MATCH" : m.tier === "uncertain" ? "MAYBE" : "—";
+    return `<tr><td>${esc(m.name)}</td><td><span class="grade ${cls}">${lbl}</span></td><td>${esc(m.owner || "")}</td><td>${esc(m.ownedAddress || "")}</td><td class="score">${m.combinedScore || ""}</td></tr>`;
+  }).join("");
+  host.innerHTML = `<div class="table-scroll" style="max-height:200px;"><table style="font-size:12px;"><thead><tr><th>Name</th><th>Match</th><th>Owner</th><th>SC Property</th><th>Score</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+document.getElementById("matchInspectionBtn").addEventListener("click", () => {
+  if (!DATASET.length) { toast("Drop an RP Data CSV first — nothing to match against."); return; }
+  openInspectionModal();
+});
+document.getElementById("inspCancelBtn").addEventListener("click", closeInspectionModal);
+document.getElementById("inspImage").addEventListener("change", e => {
+  const f = e.target.files[0];
+  const preview = document.getElementById("inspPreview");
+  if (!f) { preview.style.display = "none"; preview.src = ""; return; }
+  preview.src = URL.createObjectURL(f);
+  preview.style.display = "block";
+  setTimeout(() => document.getElementById("inspNames").focus(), 100);
+});
+document.getElementById("inspPreviewBtn").addEventListener("click", () => {
+  renderInspPreview(matchInspectionText(document.getElementById("inspNames").value));
+});
+document.getElementById("inspMatchBtn").addEventListener("click", async () => {
+  const text = document.getElementById("inspNames").value.trim();
+  if (!text) { toast("Add at least one name."); return; }
+  const property = document.getElementById("inspProperty").value.trim();
+  const dateStr = document.getElementById("inspDate").value;
+  const dateIso = dateStr ? new Date(dateStr).toISOString() : new Date().toISOString();
+  const ev = saveInspection(property, dateIso, text);
+  closeInspectionModal();
+  await refresh();
+  await autosave();
+  // Jump to the Inspections tab to show the result
+  const t = document.querySelector('.tab[data-tab="inspections"]');
+  if (t) t.click();
+  const strong = ev.matches.filter(m => m.tier === "strong").length;
+  toast(`Saved inspection — ${strong} strong match${strong === 1 ? "" : "es"} of ${ev.attendees.length}.`);
+});
+
+document.getElementById("panel-inspections").addEventListener("click", async e => {
+  const b = e.target.closest("[data-del-inspection]");
+  if (!b) return;
+  const i = parseInt(b.dataset.delInspection, 10);
+  if (!confirm("Delete this inspection?")) return;
+  INSPECTIONS.splice(i, 1);
+  saveInspections();
+  await refresh();
+  await autosave();
+});
+
 /* Boot */
-fillSettings();
-refresh().then(tryRestore);
+async function boot() {
+  await unlockGate();
+  fillSettings();
+  await refresh();
+  await tryRestore();
+}
+boot();
 </script>
 </body>
 </html>
