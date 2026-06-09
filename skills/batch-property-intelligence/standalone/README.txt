@@ -1,5 +1,35 @@
-BATCH INTELLIGENCE HUB — Browser Edition  (V4.4)
+BATCH INTELLIGENCE HUB — Browser Edition  (V4.5)
 Elite Lifestyle Properties
+
+V4.5 — Enquiry column on every tab + matching workbook tabs.
+An enquirer who also owns ≥1 SC property is nearly the best
+lead we can have, so every property tab now carries:
+  · Enq # (count of enquiries from the matched owner)
+  · Enquirer (name, with the 🔁 N× pill when ≥2)
+  · Status pill (★ WARM / 🏠 open home / UM)
+…and the default order on every property tab is now
+WARM-FIRST, then most-enquiries, then score. Quick scroll to
+the top of any tab and the strongest leads are already there.
+
+Owner-level signals propagate too: if the owner enquired on a
+different property they hold, every parcel of theirs now shows
+"★ owner warm" with the same enquirer name + date, so cross-
+suburb portfolios light up automatically on every tab.
+
+Workbook (Master Dashboard XLSX) is rebuilt to carry the same
+data through every sheet:
+  · Under Management — gains Warm Seller, Enq #, Enquirer,
+    Enquiry Date, Buyer Bracket, Active Buyer, Owner Warm,
+    Owner Enquirer, Owner Enq #, Attended Open Home.
+  · High Priority / Seller Leads / All Properties / Filtered —
+    same enquiry-signal columns added to EXPORT_COLS.
+  · Portfolios / Rentals matrices — first three columns are
+    now Enq #, Warm Enquirer, Enquiry Date so you can sort by
+    them in Excel.
+  · Warm Sellers — gains Attended Open Home flag.
+  · New "Inspections" sheet — flat list of attendee→owner
+    match rows from every saved open-home inspection.
+Workbook is now 12 tabs.
 
 V4.4 — Three additions:
 

@@ -217,7 +217,7 @@
     <h1>BATCH INTELLIGENCE HUB</h1>
     <div class="sub">Elite Lifestyle Properties — browser edition</div>
   </div>
-  <div class="sub" id="versionTag">V4.4 · 8 June 2026 · runs entirely on your machine · no data leaves the browser</div>
+  <div class="sub" id="versionTag">V4.5 · 9 June 2026 · runs entirely on your machine · no data leaves the browser</div>
 </header>
 
 <div id="lockShield" style="position:fixed;inset:0;background:var(--elite-black);color:var(--warm-white);z-index:9999;display:flex;align-items:center;justify-content:center;">
@@ -1499,6 +1499,12 @@ function recompute(allSales, contacts = []) {
     p.recentEnquiry = false;
     p.enquiryContact = "";
     p.enquiryDateStr = "";
+    p.enquiryCount = 0;
+    p.attendedInspection = false;
+    p.ownerWarm = false;
+    p.ownerEnquiryContact = "";
+    p.ownerEnquiryDateStr = "";
+    p.ownerEnquiryCount = 0;
   }
   applyManual(parcels);
   applyManaged(parcels);
@@ -1510,6 +1516,32 @@ function recompute(allSales, contacts = []) {
   applyInspectionBoost(parcels);
   applyLeaseExpiryBoost(parcels);
   applyActiveBuyerWarmBoost(parcels);
+  // V4.5 — Stamp owner-level enquiry signals onto every parcel so portfolio /
+  // rental / filtered rows can display + sort by them too. An enquirer who
+  // owns >1 SC property is the strongest single signal we have.
+  const ownerEnq = new Map();
+  for (const p of parcels) {
+    if (!p.warmSeller) continue;
+    const cur = ownerEnq.get(p.owner1);
+    if (!cur || (p.enquiryCount || 0) > (cur.count || 0)) {
+      ownerEnq.set(p.owner1, {
+        contact: p.enquiryContact || "",
+        date: p.enquiryDateStr || "",
+        count: p.enquiryCount || 1,
+        bracket: p.enquiryInterestBracket || ""
+      });
+    }
+  }
+  for (const p of parcels) {
+    const info = ownerEnq.get(p.owner1);
+    if (info) {
+      p.ownerWarm = true;
+      p.ownerEnquiryContact = info.contact;
+      p.ownerEnquiryDateStr = info.date;
+      p.ownerEnquiryCount = info.count;
+      p.ownerEnquiryBracket = info.bracket;
+    }
+  }
   for (const p of parcels) p.tier = tierLabel(p.combinedScore);
   return parcels;
 }
@@ -2002,8 +2034,8 @@ function renderDashboard() {
   setCount("all", DATASET.length);
   setCount("filtered", filtered.length);
 
-  // Summary panel
-  const top20 = DATASET.slice().sort((a, b) => b.combinedScore - a.combinedScore).slice(0, 20);
+  // Summary panel — Top 20 also warm-first
+  const top20 = sortByWarmEnquiry(DATASET).slice(0, 20);
   const chartHTML = enquiryMomentumChart(ALL_CONTACTS);
   document.getElementById("panel-summary").innerHTML = `
     <h3 class="section">LEAD GRADE DISTRIBUTION</h3>
@@ -2022,7 +2054,7 @@ function renderDashboard() {
   document.getElementById("panel-portfolios").innerHTML = portfolioTable(portfolios);
   document.getElementById("panel-warm").innerHTML = warmTable(WARM);
   document.getElementById("panel-inspections").innerHTML = inspectionsPanel();
-  document.getElementById("panel-managed").innerHTML = managedTable(DATASET.filter(p => p.managedHere).sort((a, b) => b.combinedScore - a.combinedScore));
+  document.getElementById("panel-managed").innerHTML = managedTable(sortByWarmEnquiry(DATASET.filter(p => p.managedHere)));
   document.getElementById("panel-review").innerHTML = reviewTable(REVIEW);
   document.getElementById("panel-holding").innerHTML = holdingTable(HOLDING);
   renderAllPanel(DATASET);
@@ -2107,6 +2139,12 @@ function enquiryCell(p) {
   if (p.warmSeller) {
     const tag = p.recentEnquiry ? "★ WARM" : "★ warm";
     out += `<span class="grade HIGH" title="Enquired: ${esc(p.enquiryContact)} (${esc(p.enquiryDateStr || "date n/a")})">${tag} ${esc(p.enquiryDateStr || "")}</span> `;
+  } else if (p.ownerWarm) {
+    // Owner enquired on a different property they hold — still a warm seller signal.
+    out += `<span class="grade HIGH" title="Owner enquired on another property: ${esc(p.ownerEnquiryContact)} (${esc(p.ownerEnquiryDateStr || "date n/a")})">★ owner warm</span> `;
+  }
+  if (p.attendedInspection) {
+    out += `<span class="grade MEDIUM" title="Attended an open home">🏠 open home</span> `;
   }
   if (p.underManagement) {
     const lbl = p.managedPortfolio || p.managedPortfolios || "Managed";
@@ -2114,6 +2152,29 @@ function enquiryCell(p) {
     out += `<span class="pill-um" title="${esc(title)}">UM · ${esc(lbl)}</span>`;
   }
   return out;
+}
+// V4.5 — Compact per-row enquirer name + count, blank when no enquiry.
+function enquirerNameCell(p) {
+  const name = p.enquiryContact || p.ownerEnquiryContact || "";
+  if (!name) return "";
+  const cnt = p.enquiryCount || p.ownerEnquiryCount || 0;
+  return esc(name) + (cnt >= 2 ? ` ${enquiryCountPill(cnt)}` : "");
+}
+function enquiryCountNum(p) {
+  return p.enquiryCount || p.ownerEnquiryCount || 0;
+}
+// Used everywhere we want "warm sellers with most enquiries on top" as the
+// default order. The user's golden signal: an enquirer who also owns ≥1 SC
+// property is nearly the best lead we can have.
+function sortByWarmEnquiry(rows) {
+  return rows.slice().sort((a, b) => {
+    const wa = (a.warmSeller || a.ownerWarm) ? 1 : 0;
+    const wb = (b.warmSeller || b.ownerWarm) ? 1 : 0;
+    if (wa !== wb) return wb - wa;
+    const ea = enquiryCountNum(a), eb = enquiryCountNum(b);
+    if (ea !== eb) return eb - ea;
+    return (b.combinedScore || 0) - (a.combinedScore || 0);
+  });
 }
 function tierCell(p) {
   const t = tierLabel(p.combinedScore);
@@ -2123,8 +2184,10 @@ function tierCell(p) {
 }
 function leadTable(rows) {
   if (!rows.length) return `<div class="empty">No matching properties.</div>`;
+  rows = sortByWarmEnquiry(rows);
   const body = rows.map(p => {
     const selected = SELECTED_OWNERS.has(p.owner1);
+    const enqN = enquiryCountNum(p);
     return `
     <tr class="s${Math.min(p.combinedScore, 10)} ${selected ? "selected" : ""}">
       <td class="selcell">${selectCheckbox(p.owner1)}</td>
@@ -2132,6 +2195,8 @@ function leadTable(rows) {
       <td>${gradeSpan(p.sellerLead)}</td>
       <td>${gradeSpan(p.rentalLead)}</td>
       <td>${enquiryCell(p)}</td>
+      <td style="text-align:center;font-weight:${enqN ? 700 : 400};">${enqN || ""}</td>
+      <td>${enquirerNameCell(p)}</td>
       <td>${esc(p.fullAddress)}</td>
       <td>${esc(p.suburbName)}</td>
       <td>${esc(p.owner1)} ${contactedPill(p.owner1, p.contactedCount)}</td>
@@ -2143,18 +2208,23 @@ function leadTable(rows) {
     </tr>`;
   }).join("");
   return `<div class="table-scroll"><table>
-    <thead><tr><th></th><th>Score</th><th>Seller</th><th>Rental</th><th>Status</th><th>Address</th><th>Suburb</th><th>Owner</th><th>Class</th><th>Props</th><th>Rentals</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
+    <thead><tr><th></th><th>Score</th><th>Seller</th><th>Rental</th><th>Status</th><th>Enq #</th><th>Enquirer</th><th>Address</th><th>Suburb</th><th>Owner</th><th>Class</th><th>Props</th><th>Rentals</th><th>Owner Type</th><th>Recommended Action</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 function managedTable(rows) {
   if (!rows.length) return `<div class="empty">No managed properties matched yet. Upload your Owner / Properties-Under-Management CSV (see "Pick Managed Properties CSV…"). The tool flags every owner you manage on every row they appear on, and links the specific parcels when the address matches.</div>`;
+  rows = sortByWarmEnquiry(rows);
   const body = rows.map(p => {
     const selected = SELECTED_OWNERS.has(p.owner1);
+    const enqN = enquiryCountNum(p);
     return `
     <tr class="s${Math.min(p.combinedScore, 10)} ${selected ? "selected" : ""}">
       <td class="selcell">${selectCheckbox(p.owner1)}</td>
       <td class="score">${p.combinedScore} ${tierCell(p)}</td>
       <td>${enquiryCell(p)}</td>
+      <td style="text-align:center;font-weight:${enqN ? 700 : 400};">${enqN || ""}</td>
+      <td>${enquirerNameCell(p)}</td>
+      <td>${esc(p.enquiryDateStr || p.ownerEnquiryDateStr || "")}</td>
       <td>${esc(p.owner1)} ${contactedPill(p.owner1, p.contactedCount)}</td>
       <td>${esc(p.fullAddress)}</td>
       <td>${esc(p.suburbName)}</td>
@@ -2165,9 +2235,9 @@ function managedTable(rows) {
       <td>${esc(p.recommendedAction)}</td>
     </tr>`;
   }).join("");
-  return `<div class="filterbar"><span class="muted">Properties we currently manage that also appear in the RP Data ownership database. The owner-level UM badge shows everywhere these owners appear on the dashboard.</span></div>
+  return `<div class="filterbar"><span class="muted">Properties we currently manage that also appear in the RP Data ownership database. Warm-seller / enquirer rows are sorted to the top. The owner-level UM badge shows everywhere these owners appear on the dashboard.</span></div>
     <div class="table-scroll"><table>
-    <thead><tr><th></th><th>Score</th><th>Status</th><th>Owner</th><th>Address</th><th>Suburb</th><th>Portfolio</th><th>Property Manager</th><th>Tenancy</th><th>Rent</th><th>Recommended Action</th></tr></thead>
+    <thead><tr><th></th><th>Score</th><th>Status</th><th>Enq #</th><th>Enquirer</th><th>Enquiry Date</th><th>Owner</th><th>Address</th><th>Suburb</th><th>Portfolio</th><th>Property Manager</th><th>Tenancy</th><th>Rent</th><th>Recommended Action</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 function warmTable(rows) {
@@ -2354,8 +2424,9 @@ function portfolioTable(rows) {
   const { header, data, fixedCols } = portfolioMatrix(rows);
   const thead = header.map(h => `<th>${esc(h)}</th>`).join("");
   const body = data.map(r => "<tr>" + r.map((v, i) => {
-    if (i === 2) return `<td style="text-align:center;font-weight:700;">${esc(v)}</td>`;   // Properties
-    if (i === 3) return `<td style="text-align:center;">${esc(v)}</td>`;                    // Rentals
+    if (i === 0) return `<td style="text-align:center;font-weight:${v ? 700 : 400};">${esc(v)}</td>`;  // Enq #
+    if (i === 5) return `<td style="text-align:center;font-weight:700;">${esc(v)}</td>`;               // Properties
+    if (i === 6) return `<td style="text-align:center;">${esc(v)}</td>`;                                // Rentals
     if (i >= fixedCols) return `<td style="font-size:11px;white-space:nowrap;">${esc(v)}</td>`;
     return `<td>${esc(v)}</td>`;
   }).join("") + "</tr>").join("");
@@ -2369,8 +2440,9 @@ function rentalsTable(rows) {
   const { header, data, fixedCols } = rentalsMatrix(rows);
   const thead = header.map(h => `<th>${esc(h)}</th>`).join("");
   const body = data.map(r => "<tr class=\"s" + r[0] + "\">" + r.map((v, i) => {
-    if (i === 0) return `<td class="score">${esc(v)}</td>`;
-    if (i === 4) return `<td style="text-align:center;font-weight:700;">${esc(v)}</td>`;
+    if (i === 0) return `<td class="score">${esc(v)}</td>`;                                            // Top Score
+    if (i === 1) return `<td style="text-align:center;font-weight:${v ? 700 : 400};">${esc(v)}</td>`;  // Enq #
+    if (i === 7) return `<td style="text-align:center;font-weight:700;">${esc(v)}</td>`;               // Rentals count
     if (i >= fixedCols) return `<td style="font-size:11px;white-space:nowrap;">${esc(v)}</td>`;
     return `<td>${esc(v)}</td>`;
   }).join("") + "</tr>").join("");
@@ -2380,10 +2452,21 @@ function rentalsTable(rows) {
 }
 function filteredTable(rows) {
   if (!rows.length) return `<div class="empty">Nothing filtered out.</div>`;
-  const body = rows.map(p => `
-    <tr><td>${esc(p.fullAddress)}</td><td>${esc(p.propertyType)}</td><td>${esc(p.owner1)}</td><td>${esc(p.landUse)}</td></tr>`).join("");
+  rows = sortByWarmEnquiry(rows);
+  const body = rows.map(p => {
+    const enqN = enquiryCountNum(p);
+    return `
+    <tr>
+      <td style="text-align:center;font-weight:${enqN ? 700 : 400};">${enqN || ""}</td>
+      <td>${enquirerNameCell(p)}</td>
+      <td>${esc(p.fullAddress)}</td>
+      <td>${esc(p.propertyType)}</td>
+      <td>${esc(p.owner1)}</td>
+      <td>${esc(p.landUse)}</td>
+    </tr>`;
+  }).join("");
   return `<div class="table-scroll"><table>
-    <thead><tr><th>Address</th><th>Type</th><th>Owner</th><th>Land Use</th></tr></thead>
+    <thead><tr><th>Enq #</th><th>Enquirer</th><th>Address</th><th>Type</th><th>Owner</th><th>Land Use</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 
@@ -2394,10 +2477,10 @@ function renderAllPanel(all) {
     <div id="allTableHost"></div>`;
   const host = panel.querySelector("#allTableHost");
   const draw = (q) => {
-    let rows = all.slice().sort((a, b) => b.combinedScore - a.combinedScore);
+    let rows = sortByWarmEnquiry(all);
     if (q) {
       const ql = q.toLowerCase();
-      rows = rows.filter(p => (p.fullAddress + " " + p.owner1 + " " + p.suburb).toLowerCase().includes(ql));
+      rows = rows.filter(p => (p.fullAddress + " " + p.owner1 + " " + p.suburb + " " + (p.enquiryContact || "") + " " + (p.ownerEnquiryContact || "")).toLowerCase().includes(ql));
     }
     const cap = 1500;
     const shown = rows.slice(0, cap);
@@ -2430,8 +2513,13 @@ function csvCell(v) {
 
 const EXPORT_COLS = [
   ["combinedScore","Combined Lead Score"],["tier","Tier"],["sellerLead","Seller Lead"],["rentalLead","Rental Lead"],
-  ["knownToOffice","Known to Office"],["recentEnquiry","Recent Enquiry"],["enquiryContact","Enquiry Contact"],
-  ["enquiryDateStr","Enquiry Date"],["recommendedAction","Recommended Action"],
+  ["warmSeller","Warm Seller"],["enquiryCount","Enq #"],["enquiryContact","Enquirer"],["enquiryDateStr","Enquiry Date"],
+  ["enquiryInterest","Enquired On"],["enquiryInterestPriceFmt","Buyer $$$"],["enquiryInterestBracket","Buyer Bracket"],
+  ["enquiryActiveBuyer","Active Buyer"],["enquiryPotentialInvestor","Potential Investor"],
+  ["ownerWarm","Owner Warm Seller"],["ownerEnquiryContact","Owner Enquirer"],["ownerEnquiryCount","Owner Enq #"],
+  ["attendedInspection","Attended Open Home"],
+  ["knownToOffice","Known to Office"],["recentEnquiry","Recent Enquiry"],
+  ["recommendedAction","Recommended Action"],
   ["fullAddress","Address"],["suburbName","Suburb"],["propertyType","Property Type"],
   ["bed","Bed"],["bath","Bath"],["car","Car"],["landSize","Land Size m2"],["yearBuilt","Year Built"],
   ["owner1","Owner 1"],["ownerClass","Owner Class"],["ownerType","Owner Type"],["jointOwner","Joint Owner"],
@@ -2450,6 +2538,7 @@ const WARM_COLS = [
   ["enquiryInterest","Enquired On"],["enquiryInterestPriceFmt","Buyer $$$"],["enquiryInterestBracket","Buyer Bracket"],
   ["enquiryActiveBuyer","Active Buyer"],["enquiryPotentialInvestor","Potential Investor"],
   ["enquiryInterestManaged","Enquired-On UM"],["enquiryInterestManagedPortfolio","UM Portfolio"],
+  ["attendedInspection","Attended Open Home"],
   ["owner1","Owner (database)"],["fullAddress","SC Property Owned"],["suburbName","Suburb"],
   ["postalAddress","Postal Address"],["ownerNotes","Notes"],
   ["contactedCount","Contacted #"],["contactedLast","Last Contacted"],
@@ -2481,7 +2570,14 @@ const HOLDING_COLS = [
   ["rpDataResult","Owns SC property? (Y/N)"]
 ];
 const MANAGED_COLS = [
-  ["combinedScore","Score"],["tier","Tier"],["owner1","Owner"],
+  ["combinedScore","Score"],["tier","Tier"],
+  ["warmSeller","Warm Seller"],["enquiryCount","Enq #"],
+  ["enquiryContact","Enquirer"],["enquiryDateStr","Enquiry Date"],
+  ["enquiryInterest","Enquired On"],["enquiryInterestBracket","Buyer Bracket"],
+  ["enquiryActiveBuyer","Active Buyer"],
+  ["ownerWarm","Owner Warm Seller"],["ownerEnquiryContact","Owner Enquirer"],["ownerEnquiryCount","Owner Enq #"],
+  ["attendedInspection","Attended Open Home"],
+  ["owner1","Owner"],
   ["fullAddress","Address"],["suburbName","Suburb"],
   ["managedPortfolio","Portfolio"],["managedPropertyManager","Property Manager"],
   ["managedTenancy","Tenancy"],["managedRent","Rent"],
@@ -2492,33 +2588,45 @@ const MANAGED_COLS = [
 // dynamically: one "SC Property N" column per holding (widest owner sets N),
 // plus a Postal Address column (blank unless the export carried one).
 function portfolioMatrix(rows) {
+  rows = sortByWarmEnquiry(rows);
   const maxProps = rows.reduce((m, r) => Math.max(m, (r.ownerPropertyList || []).length), 0);
-  const header = ["Owner", "Class", "Properties", "Rentals", "Postal Address", "Profile"];
+  const header = ["Enq #", "Warm Enquirer", "Enquiry Date", "Owner", "Class", "Properties", "Rentals", "Postal Address", "Profile"];
   for (let i = 1; i <= maxProps; i++) header.push("SC Property " + i);
   const data = rows.map(r => {
     const list = r.ownerPropertyList || [];
-    const row = [r.owner1, r.ownerClass, r.ownerPropertyCount, r.ownerRentalCount,
+    const enqN = enquiryCountNum(r);
+    const enqName = r.enquiryContact || r.ownerEnquiryContact || "";
+    const enqDate = r.enquiryDateStr || r.ownerEnquiryDateStr || "";
+    const row = [enqN || "", enqName, enqDate,
+                 r.owner1, r.ownerClass, r.ownerPropertyCount, r.ownerRentalCount,
                  r.postalAddress || "", r.profile || portfolioProfile(r)];
     for (let i = 0; i < maxProps; i++) row.push(list[i] || "");
     return row;
   });
-  return { header, data, fixedCols: 6 };
+  return { header, data, fixedCols: 9 };
 }
 // Rentals rollup: top score + landlord + a separate Suburbs column + one
 // "Rental Property N" column per rental (widest landlord sets N).
 function rentalsMatrix(rows) {
+  rows = sortByWarmEnquiry(rows);
   const maxR = rows.reduce((m, r) => Math.max(m, (r.ownerRentalList || []).length), 0);
-  const header = ["Top Score", "Owner", "Class", "Owner Type", "Rentals", "Suburbs", "Postal Address"];
+  const header = ["Top Score", "Enq #", "Warm Enquirer", "Enquiry Date", "Owner", "Class", "Owner Type", "Rentals", "Suburbs", "Postal Address"];
   for (let i = 1; i <= maxR; i++) header.push("Rental Property " + i);
   const data = rows.map(r => {
     const list = r.ownerRentalList || [];
-    const row = [r.rentalTopScore, r.owner1, r.ownerClass, r.ownerType, r.ownerRentalCount, r.ownerRentalSuburbs || "", r.postalAddress || ""];
+    const enqN = enquiryCountNum(r);
+    const enqName = r.enquiryContact || r.ownerEnquiryContact || "";
+    const enqDate = r.enquiryDateStr || r.ownerEnquiryDateStr || "";
+    const row = [r.rentalTopScore, enqN || "", enqName, enqDate,
+                 r.owner1, r.ownerClass, r.ownerType, r.ownerRentalCount,
+                 r.ownerRentalSuburbs || "", r.postalAddress || ""];
     for (let i = 0; i < maxR; i++) row.push(list[i] || "");
     return row;
   });
-  return { header, data, fixedCols: 7 };
+  return { header, data, fixedCols: 10 };
 }
 const FILTERED_COLS = [
+  ["enquiryCount","Enq #"],["enquiryContact","Enquirer"],["ownerWarm","Owner Warm Seller"],
   ["fullAddress","Address"],["propertyType","Type"],["owner1","Owner"],["landUse","Land Use"]
 ];
 
@@ -2529,10 +2637,10 @@ function rowsToCSV(rows, cols) {
 }
 
 /* ── data subsets ── */
-function subsetSeller()   { return DATASET.filter(p => p.sellerLead !== "NO").sort((a, b) => b.combinedScore - a.combinedScore); }
-function subsetHigh()     { return DATASET.filter(p => p.sellerLead === "HIGH" || p.rentalLead === "HIGH").sort((a, b) => b.combinedScore - a.combinedScore); }
-function subsetAll()      { return DATASET.slice().sort((a, b) => b.combinedScore - a.combinedScore); }
-function subsetFiltered() { return DATASET.filter(p => p.nonSaleable); }
+function subsetSeller()   { return sortByWarmEnquiry(DATASET.filter(p => p.sellerLead !== "NO")); }
+function subsetHigh()     { return sortByWarmEnquiry(DATASET.filter(p => p.sellerLead === "HIGH" || p.rentalLead === "HIGH")); }
+function subsetAll()      { return sortByWarmEnquiry(DATASET); }
+function subsetFiltered() { return sortByWarmEnquiry(DATASET.filter(p => p.nonSaleable)); }
 // Rentals rolled up per landlord: one row per owner with ≥1 rental, carrying
 // their top combined score across those rentals (highest first).
 function subsetRentalLandlords() {
@@ -2608,7 +2716,7 @@ const exportPortfolios = () => exportMatrix(portfoliosInSuburb(subsetPortfolios(
 const exportHigh       = () => exportCSV(parcelsInSuburb(subsetHigh()), EXPORT_COLS, "high-priority leads", "HighPriority");
 const exportAll        = () => exportCSV(parcelsInSuburb(subsetAll()), EXPORT_COLS, "parcels", "AllProperties");
 const exportWarm       = () => exportCSV(warmInBracket(parcelsInSuburb(WARM)), WARM_COLS, "warm sellers", "WarmSellers");
-const exportManaged    = () => exportCSV(parcelsInSuburb(DATASET.filter(p => p.managedHere).sort((a, b) => b.combinedScore - a.combinedScore)), MANAGED_COLS, "managed properties", "UnderManagement");
+const exportManaged    = () => exportCSV(parcelsInSuburb(sortByWarmEnquiry(DATASET.filter(p => p.managedHere))), MANAGED_COLS, "managed properties", "UnderManagement");
 const exportHolding    = () => exportCSV(holdingInBracket(holdingInSuburb(HOLDING)), HOLDING_COLS, "holding enquirers", "Holding_PendingRPData");
 
 /* Outreach list — Warm Sellers + Holding combined, DNC rows removed, ready
@@ -2871,19 +2979,42 @@ function exportWorkbook() {
     buildSummarySheet(),
     sheetFrom("Warm Sellers", warmInBracket(parcelsInSuburb(WARM)), WARM_COLS),
     sheetFrom("Outreach (DNC excluded)", outreachRows, OUTREACH_COLS),
-    sheetFrom("Under Management", parcelsInSuburb(DATASET.filter(p => p.managedHere).sort((a, b) => b.combinedScore - a.combinedScore)), MANAGED_COLS),
+    sheetFrom("Under Management", parcelsInSuburb(sortByWarmEnquiry(DATASET.filter(p => p.managedHere))), MANAGED_COLS),
     sheetFrom("High Priority", parcelsInSuburb(subsetHigh()), EXPORT_COLS),
     sheetFrom("Seller Leads", parcelsInSuburb(subsetSeller()), EXPORT_COLS),
     (() => { const rm = rentalsMatrix(landlordsInSuburb(subsetRentalLandlords())); return { name: "Rentals", header: rm.header, rows: rm.data.map(r => r.map(cellValue)) }; })(),
     (() => { const pm = portfolioMatrix(portfoliosInSuburb(subsetPortfolios())); return { name: "Portfolios", header: pm.header, rows: pm.data.map(r => r.map(cellValue)) }; })(),
     sheetFrom("All Properties", parcelsInSuburb(subsetAll()), EXPORT_COLS),
     sheetFrom("Holding Pending RP Data", holdingInBracket(holdingInSuburb(HOLDING)), HOLDING_COLS),
+    buildInspectionsSheet(),
     sheetFrom("Filtered Out", parcelsInSuburb(subsetFiltered()), FILTERED_COLS)
   ];
   const bytes = buildXlsx(sheets);
   downloadBlob(bytes, `BPI_Master_Dashboard${subSuffix()}${brSuffix()}_${stamp()}.xlsx`,
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  toast(`Exported workbook (11 tabs)${subLabel()}${brLabel()} to Excel.`);
+  toast(`Exported workbook (${sheets.length} tabs)${subLabel()}${brLabel()} to Excel.`);
+}
+
+// V4.5 — Inspections workbook sheet: one row per attendee match across all
+// saved inspections, so it Excel-sorts and -filters the same as Warm Sellers.
+function buildInspectionsSheet() {
+  const header = ["Inspection Date", "Property", "Attendee (as listed)", "Match", "Owner (database)", "SC Property Owned", "Score"];
+  const rows = [];
+  for (const ev of INSPECTIONS) {
+    const date = ev.date ? new Date(ev.date).toLocaleString("en-AU", { dateStyle: "short", timeStyle: "short" }) : "";
+    for (const m of (ev.matches || [])) {
+      rows.push([
+        date,
+        ev.property || "",
+        m.name || "",
+        m.tier === "strong" ? "MATCH" : m.tier === "uncertain" ? "MAYBE" : "no match",
+        m.owner || "",
+        m.ownedAddress || "",
+        m.combinedScore || ""
+      ]);
+    }
+  }
+  return { name: "Inspections", header, rows };
 }
 
 /* ───────────────────────── UI wiring ───────────────────────── */
@@ -3034,9 +3165,8 @@ document.getElementById("clearSelectionBtn").addEventListener("click", () => {
 /* Global search — address / owner / enquirer name */
 function runSearch(q) {
   const panel = document.getElementById("panel-search");
-  const matchP = DATASET
-    .filter(p => (p.fullAddress + " " + p.owner1 + " " + (p.owner2 || "") + " " + p.suburb + " " + (p.enquiryContact || "")).toLowerCase().includes(q))
-    .sort((a, b) => b.combinedScore - a.combinedScore);
+  const matchP = sortByWarmEnquiry(DATASET
+    .filter(p => (p.fullAddress + " " + p.owner1 + " " + (p.owner2 || "") + " " + p.suburb + " " + (p.enquiryContact || "") + " " + (p.ownerEnquiryContact || "")).toLowerCase().includes(q)));
   const warm = matchP.filter(p => p.warmSeller);
   document.getElementById("searchHint").textContent =
     `${matchP.length} propert${matchP.length === 1 ? "y" : "ies"}/owner${matchP.length === 1 ? "" : "s"}` +
