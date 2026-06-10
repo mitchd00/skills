@@ -217,7 +217,7 @@
     <h1>BATCH INTELLIGENCE HUB</h1>
     <div class="sub">Elite Lifestyle Properties — browser edition</div>
   </div>
-  <div class="sub" id="versionTag">V4.6 · 10 June 2026 · runs entirely on your machine · no data leaves the browser</div>
+  <div class="sub" id="versionTag">V4.7 · 10 June 2026 · runs entirely on your machine · no data leaves the browser</div>
 </header>
 
 <div id="lockShield" style="position:fixed;inset:0;background:var(--elite-black);color:var(--warm-white);z-index:9999;display:flex;align-items:center;justify-content:center;">
@@ -1067,10 +1067,16 @@ function applyInspectionBoost(parcels) {
     // attended flag for visibility on every tab.
     if (p.nonSaleable) continue;
     if (boost > 0) {
+      // V4.7 — the more opens they attend, the warmer they are. Same tiering
+      // as the repeat-enquirer boost: 3-5 attendances +1, 6+ attendances +2,
+      // stacked on the base boost, capped at score_cap.
+      const cnt = p.inspectionCount;
+      const extra = cnt >= 6 ? 2 : cnt >= 3 ? 1 : 0;
       const before = p.combinedScore;
-      p.combinedScore = Math.min(cap, p.combinedScore + boost);
+      p.combinedScore = Math.min(cap, p.combinedScore + boost + extra);
       p.inspectionBoost = p.combinedScore - before;
-      p.recommendedAction = (p.recommendedAction || "") + ` — attended open home.`;
+      p.recommendedAction = (p.recommendedAction || "") +
+        ` — inspected our listing${cnt > 1 ? ` ${cnt}×` : ""} & owns SC — potential seller.`;
     }
   }
 }
@@ -1383,10 +1389,35 @@ function computeHolding(contacts, parcels) {
     const prev = byPerson.get(key);
     if (!prev || (c.enquiryDateMs || 0) > (prev.enquiryDateMs || 0)) byPerson.set(key, c);
   }
-  // Default sort: hottest = most enquiries per person first, then most recent.
+  // V4.7 — stamp per-person open-home attendance: an enquirer who also keeps
+  // showing up at our opens is warmer than their enquiry count alone implies.
+  const attCounts = buildAttendeeCounts();
+  for (const c of byPerson.values()) {
+    c.inspectionCount = attCounts.get(personTokenKey(c.name)) || 0;
+  }
+  // Default sort: hottest = most enquiries per person first, then most
+  // inspections, then most recent.
   return Array.from(byPerson.values()).sort((a, b) =>
     ((b.enquiryCount || 1) - (a.enquiryCount || 1)) ||
+    ((b.inspectionCount || 0) - (a.inspectionCount || 0)) ||
     ((b.enquiryDateMs || 0) - (a.enquiryDateMs || 0)));
+}
+
+// V4.7 — Per-person inspection attendance, keyed by sorted name tokens so
+// "John Smith" and "SMITH JOHN" land on the same person.
+function personTokenKey(name) {
+  return Array.from(nameTokens(name)).sort().join("|");
+}
+function buildAttendeeCounts() {
+  const counts = new Map();
+  for (const ev of INSPECTIONS) {
+    for (const a of (ev.attendees || [])) {
+      const k = personTokenKey(attName(a));
+      if (!k) continue;
+      counts.set(k, (counts.get(k) || 0) + 1);
+    }
+  }
+  return counts;
 }
 
 // V4.4/V4.6 — Run a list of attendee names through the owner-matching engine.
@@ -2364,9 +2395,14 @@ function renderDashboard() {
   const repeatEnquirers = HOLDING.filter(c => (c.enquiryCount || 1) >= 2).length
                         + WARM.filter(p => (p.enquiryCount || 1) >= 2).length;
   const uniquePeople = HOLDING.length + WARM.length;
+  // V4.7 — attendees of OUR opens who also own SC property = potential sellers.
+  const inspectorSellers = INSPECTIONS.length
+    ? computeInspectors().filter(r => r.tier === "strong").length
+    : 0;
   document.getElementById("statGrid").innerHTML = [
     card(DATASET.length, "Total parcels"),
     card(WARM.length, "Warm sellers"),
+    card(inspectorSellers, "🏠 Inspector sellers"),
     card(managedRows.length, "Under management"),
     card(flaming, "🔥🔥 FLAMING"),
     card(hot, "🔥 HOT"),
@@ -2617,7 +2653,7 @@ function warmTable(rows) {
       <td class="selcell">${selectCheckbox(p.owner1)}</td>
       <td class="score">${p.combinedScore}</td>
       <td>${enquiryCell(p)}</td>
-      <td>${esc(p.enquiryContact)} ${enquiryCountPill(p.enquiryCount)} ${inv} ${dncPill}</td>
+      <td>${esc(p.enquiryContact)} ${enquiryCountPill(p.enquiryCount)} ${inspectionCountPill(p.inspectionCount)} ${inv} ${dncPill}</td>
       <td style="text-align:center;font-weight:600;">${p.enquiryCount || 1}</td>
       <td style="text-align:center;font-weight:${p.inspectionCount ? 700 : 400};">${p.inspectionCount || ""}</td>
       <td>${esc(p.enquiryDateStr)}</td>
@@ -2702,7 +2738,7 @@ function inspectorsTable() {
   const s = INSPECTORS_SORT;
   const body = rows.map(r => {
     const cls = r.tier === "strong" ? "HIGH" : r.tier === "uncertain" ? "MEDIUM" : "NO";
-    const label = r.tier === "strong" ? "SC OWNER" : r.tier === "uncertain" ? "MAYBE" : "—";
+    const label = r.tier === "strong" ? "POTENTIAL SELLER" : r.tier === "uncertain" ? "MAYBE" : "—";
     return `<tr class="${r.tier === "strong" ? "s8" : ""}">
       <td>${esc(r.name)} ${r.inspCount >= 2 ? `<span class="pill-repeat" title="${r.inspCount} inspections — hot prospect">🏠 ${r.inspCount}×</span>` : ""}</td>
       <td style="text-align:center;font-weight:700;">${r.inspCount}</td>
@@ -2716,7 +2752,7 @@ function inspectorsTable() {
       <td class="wrap" style="max-width:280px;white-space:normal;">${esc(r.propList)}</td>
     </tr>`;
   }).join("");
-  return `<h3 class="section">TOP INSPECTORS — every attendee across all saved inspections (click headers to sort)</h3>
+  return `<h3 class="section">TOP INSPECTORS — most inspections = warmest. Inspected our listing + owns SC property = POTENTIAL SELLER. (click headers to sort)</h3>
     <div class="table-scroll"><table>
     <thead><tr>
       <th data-table="inspectors" data-sort="name" class="${sortClass(s,'name')}">Name${arrowFor(s,'name')}</th>
@@ -2807,6 +2843,12 @@ function enquiryCountPill(n) {
   if (!n || n < 2) return "";
   return `<span class="pill-repeat" title="${n} enquiries from this person — hotter lead">🔁 ${n}×</span>`;
 }
+// V4.7 — per-person open-home attendance pill; shows from 1 attendance up
+// because physically walking through a listing is a stronger act than a click.
+function inspectionCountPill(n) {
+  if (!n) return "";
+  return `<span class="pill-um" style="background:#6a1b9a;" title="${n} open-home inspection${n === 1 ? "" : "s"} attended — the more they inspect, the warmer they are">🏠 ${n}×</span>`;
+}
 function managedPropertyPill(c) {
   if (!c.interestManaged) return "";
   const label = c.interestManagedPortfolio ? "OUR PM · " + c.interestManagedPortfolio : "OUR PM";
@@ -2827,8 +2869,9 @@ function holdingTable(rows) {
     const dnc = dncFlags(c).length > 0;
     return `
     <tr class="${dnc ? "dnc-row" : ""}">
-      <td>${esc(c.name)} ${enquiryCountPill(c.enquiryCount)} ${investorPill(c)} ${dncPill(c)}</td>
+      <td>${esc(c.name)} ${enquiryCountPill(c.enquiryCount)} ${inspectionCountPill(c.inspectionCount)} ${investorPill(c)} ${dncPill(c)}</td>
       <td style="text-align:center;font-weight:600;">${c.enquiryCount || 1}</td>
+      <td style="text-align:center;font-weight:${c.inspectionCount ? 700 : 400};">${c.inspectionCount || ""}</td>
       <td>${esc(c.enquiryDateStr)}</td>
       <td>${esc(c.phone)}</td>
       <td>${esc(c.email)}</td>
@@ -2846,6 +2889,7 @@ function holdingTable(rows) {
     <thead><tr>
       <th data-table="holding" data-sort="name" class="${sortClass(s,'name')}">Name${arrowFor(s,'name')}</th>
       <th data-table="holding" data-sort="enquiryCount" class="${sortClass(s,'enquiryCount')}">Enq #${arrowFor(s,'enquiryCount')}</th>
+      <th data-table="holding" data-sort="inspectionCount" class="${sortClass(s,'inspectionCount')}">Insp #${arrowFor(s,'inspectionCount')}</th>
       <th data-table="holding" data-sort="enquiryDateMs" class="${sortClass(s,'enquiryDateMs')}">Enquiry Date${arrowFor(s,'enquiryDateMs')}</th>
       <th>Phone</th><th>Email</th>
       <th data-table="holding" data-sort="activeBuyer" class="${sortClass(s,'activeBuyer')}">Active Buyer${arrowFor(s,'activeBuyer')}</th>
@@ -2994,6 +3038,7 @@ const WARM_COLS = [
 const HOLDING_COLS = [
   ["name","Name"],
   ["enquiryCount","Enq #"],
+  ["inspectionCount","Insp #"],
   ["enquiryDateStr","Enquiry Date"],
   ["phone","Phone"],
   ["email","Email"],
@@ -3170,6 +3215,7 @@ const OUTREACH_COLS = [
   ["tier","Tier"],
   ["name","Name"],
   ["enquiryCount","Enq #"],
+  ["inspectionCount","Insp #"],
   ["phone","Phone"],
   ["email","Email"],
   ["interest","Property Enquired On"],
@@ -3192,6 +3238,7 @@ function exportOutreach() {
       tier: p.tier || tierLabel(p.combinedScore),
       name: p.enquiryContact || "",
       enquiryCount: p.enquiryCount || 1,
+      inspectionCount: p.inspectionCount || 0,
       phone: p.enquiryContactPhone || "",
       email: p.enquiryContactEmail || "",
       interest: p.enquiryInterest || "",
@@ -3213,6 +3260,7 @@ function exportOutreach() {
       tier: "",
       name: c.name || "",
       enquiryCount: c.enquiryCount || 1,
+      inspectionCount: c.inspectionCount || 0,
       phone: c.phone || "",
       email: c.email || "",
       interest: c.interest || "",
@@ -3227,7 +3275,7 @@ function exportOutreach() {
       recommendedAction: ""
     }));
   const rows = warmRows.concat(holdRows).sort((a, b) =>
-    (b.score - a.score) || (b.enquiryCount - a.enquiryCount));
+    (b.score - a.score) || (b.enquiryCount - a.enquiryCount) || ((b.inspectionCount || 0) - (a.inspectionCount || 0)));
   if (!rows.length) { toast(`No outreach rows${subLabel()}${brLabel()} to export.`); return; }
   downloadBlob(rowsToCSV(rows, OUTREACH_COLS), `BPI_Outreach${subSuffix()}${brSuffix()}_${stamp()}.csv`, "text/csv;charset=utf-8");
   toast(`Exported ${rows.length} outreach row${rows.length === 1 ? "" : "s"}${subLabel()}${brLabel()} (DNC excluded).`);
@@ -3396,7 +3444,7 @@ function exportWorkbook() {
   const outreachRows = (() => {
     const w = warmInBracket(parcelsInSuburb(WARM)).filter(notDnc).map(p => ({
       leadType:"Warm Seller", score:p.combinedScore, tier:p.tier||tierLabel(p.combinedScore),
-      name:p.enquiryContact||"", enquiryCount:p.enquiryCount||1,
+      name:p.enquiryContact||"", enquiryCount:p.enquiryCount||1, inspectionCount:p.inspectionCount||0,
       phone:p.enquiryContactPhone||"", email:p.enquiryContactEmail||"",
       interest:p.enquiryInterest||"", interestPriceFmt:p.enquiryInterestPriceFmt||"",
       interestPriceBracket:p.enquiryInterestBracket||"",
@@ -3406,7 +3454,7 @@ function exportWorkbook() {
     }));
     const h = holdingInBracket(holdingInSuburb(HOLDING)).filter(notDnc).map(c => ({
       leadType:"Active Enquirer", score:0, tier:"",
-      name:c.name||"", enquiryCount:c.enquiryCount||1,
+      name:c.name||"", enquiryCount:c.enquiryCount||1, inspectionCount:c.inspectionCount||0,
       phone:c.phone||"", email:c.email||"",
       interest:c.interest||"", interestPriceFmt:c.interestPriceFmt||"",
       interestPriceBracket:c.interestPriceBracket||"",
@@ -3415,7 +3463,7 @@ function exportWorkbook() {
       managedHere:c.interestManaged?"Y":"", managedPortfolio:c.interestManagedPortfolio||"",
       ownedAddress:"", ownerDb:"", recommendedAction:""
     }));
-    return w.concat(h).sort((a, b) => (b.score - a.score) || (b.enquiryCount - a.enquiryCount));
+    return w.concat(h).sort((a, b) => (b.score - a.score) || (b.enquiryCount - a.enquiryCount) || ((b.inspectionCount || 0) - (a.inspectionCount || 0)));
   })();
   const sheets = [
     buildSummarySheet(),
@@ -3470,7 +3518,7 @@ function buildInspectorsSheet() {
     .sort((a, b) => (b.inspCount - a.inspCount) || (b.lastMs - a.lastMs))
     .map(r => [
       r.name, r.inspCount, r.propCount, r.lastDateStr, r.phone,
-      r.tier === "strong" ? "SC OWNER" : r.tier === "uncertain" ? "MAYBE" : "",
+      r.tier === "strong" ? "POTENTIAL SELLER" : r.tier === "uncertain" ? "MAYBE" : "",
       r.owner, r.ownedAddress, r.combinedScore || "", r.propList
     ]);
   return { name: "Top Inspectors", header, rows };

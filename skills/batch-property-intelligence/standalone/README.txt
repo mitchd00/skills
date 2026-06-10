@@ -1,5 +1,29 @@
-BATCH INTELLIGENCE HUB — Browser Edition  (V4.6)
+BATCH INTELLIGENCE HUB — Browser Edition  (V4.7)
 Elite Lifestyle Properties
+
+V4.7 — Inspections stamped against the person; scaled warmth.
+
+THE RULE: the more inspections a person attends, the warmer
+they are. And if they inspected a listing WE are selling while
+owning a property on the Sunshine Coast, they may be a seller.
+
+- Every person now carries a purple "🏠 N×" attendance pill and
+  an "Insp #" column in Holding AND Warm Sellers (both sortable
+  high→low alongside Enq #).
+- Holding default order is now Enq # → Insp # → most recent, so
+  the most-engaged unmatched people surface first; their
+  attendance count rides along into the Holding CSV and the
+  Outreach List (new "Insp #" column, used as a sort tiebreak).
+- The inspection score boost now SCALES with attendance, same
+  tiering as repeat enquirers: base +3 for any attendance, +1
+  more at 3-5 opens, +2 more at 6+, capped at 20. Recommended
+  Action reads "inspected our listing N× & owns SC — potential
+  seller."
+- The Top Inspectors leaderboard labels every attendee-owner
+  match as "POTENTIAL SELLER", and a new dashboard stat card
+  ("🏠 Inspector sellers") counts them at a glance.
+- Person-matching is token-based, so "John Smith" on the report
+  matches "SMITH JOHN" on an enquiry.
 
 V4.6 — Inspections PDF import + Top Inspectors leaderboard.
 
