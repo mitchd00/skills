@@ -1,5 +1,38 @@
-BATCH INTELLIGENCE HUB — Browser Edition  (V4.5)
+BATCH INTELLIGENCE HUB — Browser Edition  (V4.6)
 Elite Lifestyle Properties
+
+V4.6 — Inspections PDF import + Top Inspectors leaderboard.
+
+IMPORT INSPECTIONS PDF. New "Import Inspections PDF…" button
+takes the CRM's per-agent Inspections Report PDF straight in —
+no copy/paste needed. The Hub reads the PDF entirely in the
+browser (no upload, no dependency), reconstructs the table
+(client, phone, date, property, interest — wrapped names and
+two-line addresses handled), groups rows into open-home events,
+and runs every attendee through the owner-matching engine.
+Tested against real reports: 306/306 and 98/98 rows captured.
+Re-importing the same file replaces its prior events rather
+than duplicating. The agent's name is captured per event.
+
+TOP INSPECTORS. The Inspections tab now opens with a sortable
+leaderboard of every attendee across all saved inspections:
+Insp # (how many opens they've attended), properties visited,
+last inspection date, phone, and whether they matched an SC
+owner (with owned address + score). Click any header to sort
+high→low / low→high — repeat inspectors are the hot prospects.
+A 🏠 N× pill marks anyone with 2+ attendances. Event cards
+below collapse to one line each (tap to expand).
+
+SORTING. Warm Sellers gains a sortable "Insp #" column next to
+"Enq #", so enquiry count and inspection count both sort
+high-to-low with one click. An enquirer who also owns SC
+property AND attends opens is about the strongest signal there
+is — these now bubble straight to the top.
+
+The complete workbook gains a "Top Inspectors" sheet and the
+Inspections sheet now carries Phone + Agent (workbook now 13
+tabs). Owner-level Insp # is exported on Warm Sellers / High
+Priority / All Properties / Under Management.
 
 V4.5 — Enquiry column on every tab + matching workbook tabs.
 An enquirer who also owns ≥1 SC property is nearly the best

@@ -217,7 +217,7 @@
     <h1>BATCH INTELLIGENCE HUB</h1>
     <div class="sub">Elite Lifestyle Properties — browser edition</div>
   </div>
-  <div class="sub" id="versionTag">V4.5.1 · 10 June 2026 · runs entirely on your machine · no data leaves the browser</div>
+  <div class="sub" id="versionTag">V4.6 · 10 June 2026 · runs entirely on your machine · no data leaves the browser</div>
 </header>
 
 <div id="lockShield" style="position:fixed;inset:0;background:var(--elite-black);color:var(--warm-white);z-index:9999;display:flex;align-items:center;justify-content:center;">
@@ -256,6 +256,8 @@
     <button id="pickEnrichBtn">Update postal/notes from sheet…</button>
     <input type="file" id="enrichInput" hidden>
     <button id="matchInspectionBtn">Match Inspection List…</button>
+    <button id="importInspPdfBtn">Import Inspections PDF…</button>
+    <input type="file" id="inspPdfInput" accept="application/pdf,.pdf" multiple hidden>
     <button class="danger" id="clearBtn">Clear database</button>
     <div class="dbstat" id="dbstat">Database empty</div>
   </div>
@@ -1047,16 +1049,18 @@ function applyInspectionBoost(parcels) {
   // gated on a non-zero boost weight.
   const boost = CONFIG.inspection_boost || 0;
   const cap = CONFIG.score_cap || 20;
-  const ownersAttending = new Set();
+  // owner → number of attended inspections (strong matches across all events)
+  const ownerInspCount = new Map();
   for (const ev of INSPECTIONS) {
     for (const m of (ev.matches || [])) {
-      if (m.tier === "strong" && m.owner) ownersAttending.add(m.owner);
+      if (m.tier === "strong" && m.owner) ownerInspCount.set(m.owner, (ownerInspCount.get(m.owner) || 0) + 1);
     }
   }
-  if (!ownersAttending.size) return;
+  if (!ownerInspCount.size) return;
   for (const p of parcels) {
-    if (!ownersAttending.has(p.owner1)) continue;
+    if (!ownerInspCount.has(p.owner1)) continue;
     p.attendedInspection = true;
+    p.inspectionCount = ownerInspCount.get(p.owner1);
     // recommendedAction reason text is appended whenever the predicate matches
     // (even if the score is already capped); the boost arithmetic still respects
     // the cap. Saleable + in-SC only — non-saleable parcels still get the
@@ -1385,12 +1389,10 @@ function computeHolding(contacts, parcels) {
     ((b.enquiryDateMs || 0) - (a.enquiryDateMs || 0)));
 }
 
-// V4.4 — Take a free-text list of attendee names and run each line through
-// the owner-matching engine. No image OCR — agent pastes names from iOS Live
-// Text (long-press in Photos / Files preview → Copy).
-function matchInspectionText(text) {
-  if (!DATASET.length) return [];
-  const lines = String(text || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+// V4.4/V4.6 — Run a list of attendee names through the owner-matching engine.
+// Shared by the textarea paste flow AND the Inspections-PDF import.
+function matchAttendeeNames(names) {
+  if (!DATASET.length) return names.map(n => ({ name: n, tier: "none", owner: null, ownedAddress: "", combinedScore: 0 }));
   const index = buildOwnerIndex(DATASET);
   // Pre-bucket parcels by owner for cheap best-score lookup.
   const bestByOwner = new Map();
@@ -1400,18 +1402,18 @@ function matchInspectionText(text) {
     if (!cur || p.combinedScore > cur.combinedScore) bestByOwner.set(p.owner1, p);
   }
   const out = [];
-  for (const line of lines) {
-    const fakeContact = { name: line, tokens: Array.from(nameTokens(line)) };
+  for (const name of names) {
+    const fakeContact = { name, tokens: Array.from(nameTokens(name)) };
     const matches = classifyContactMatches(fakeContact, index);
     if (!matches.length) {
-      out.push({ name: line, tier: "none", owner: null, ownedAddress: "", combinedScore: 0 });
+      out.push({ name, tier: "none", owner: null, ownedAddress: "", combinedScore: 0 });
       continue;
     }
     const strong = matches.find(m => m.tier === "strong");
     const m = strong || matches[0];
     const best = bestByOwner.get(m.name);
     out.push({
-      name: line,
+      name,
       tier: m.tier,
       owner: m.name,
       ownedAddress: best ? best.fullAddress : "",
@@ -1420,10 +1422,18 @@ function matchInspectionText(text) {
   }
   return out;
 }
+function matchInspectionText(text) {
+  const lines = String(text || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  return matchAttendeeNames(lines);
+}
+
+// Attendees may be plain strings (paste flow) or {name, phone} objects (PDF import).
+function attName(a) { return typeof a === "string" ? a : (a && a.name) || ""; }
+function attPhone(a) { return typeof a === "string" ? "" : (a && a.phone) || ""; }
 
 function saveInspection(property, dateIso, attendeesText) {
   const attendees = attendeesText.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-  const matches = matchInspectionText(attendeesText);
+  const matches = matchAttendeeNames(attendees);
   INSPECTIONS.unshift({
     date: dateIso || new Date().toISOString(),
     property: property || "",
@@ -1431,6 +1441,343 @@ function saveInspection(property, dateIso, attendeesText) {
   });
   saveInspections();
   return INSPECTIONS[0];
+}
+
+/* ── V4.6 — Inspections-PDF import (agent Inspections Report) ──
+   Minimal PDF text extractor — no dependency, uses the browser's native
+   DecompressionStream. Handles classic PDF 1.4 objects, FlateDecode
+   streams, single-byte fonts with ToUnicode CMaps, Tm/Td positioned text
+   — i.e. the format the CRM's "Inspections Report" export produces. */
+
+async function pdfInflate(bytes) {
+  // Trim trailing EOL/whitespace before 'endstream' — strict inflaters reject trailing junk.
+  let end = bytes.length;
+  while (end > 0 && (bytes[end - 1] === 0x0a || bytes[end - 1] === 0x0d || bytes[end - 1] === 0x20 || bytes[end - 1] === 0x09)) end--;
+  const ds = new DecompressionStream("deflate");
+  const stream = new Blob([bytes.subarray(0, end)]).stream().pipeThrough(ds);
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+function pdfLatin(bytes) {
+  let s = "";
+  const CH = 8192;
+  for (let i = 0; i < bytes.length; i += CH) {
+    s += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + CH, bytes.length)));
+  }
+  return s;
+}
+// ToUnicode CMap (text) → Map(code → unicode string)
+function pdfParseCMap(text) {
+  const map = new Map();
+  const hex2str = h => {
+    let out = "";
+    for (let i = 0; i + 4 <= h.length; i += 4) out += String.fromCharCode(parseInt(h.slice(i, i + 4), 16));
+    return out || (h.length >= 2 ? String.fromCharCode(parseInt(h, 16)) : "");
+  };
+  let m;
+  const charRe = /beginbfchar([\s\S]*?)endbfchar/g;
+  while ((m = charRe.exec(text))) {
+    const pairRe = /<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/g;
+    let p;
+    while ((p = pairRe.exec(m[1]))) map.set(parseInt(p[1], 16), hex2str(p[2]));
+  }
+  const rangeRe = /beginbfrange([\s\S]*?)endbfrange/g;
+  while ((m = rangeRe.exec(text))) {
+    const triRe = /<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(?:<([0-9A-Fa-f]+)>|\[([\s\S]*?)\])/g;
+    let t;
+    while ((t = triRe.exec(m[1]))) {
+      const lo = parseInt(t[1], 16), hi = parseInt(t[2], 16);
+      if (t[3] !== undefined) {
+        const base = parseInt(t[3], 16);
+        for (let c = lo; c <= hi; c++) map.set(c, String.fromCharCode(base + (c - lo)));
+      } else if (t[4]) {
+        const items = t[4].match(/<([0-9A-Fa-f]+)>/g) || [];
+        items.forEach((it, idx) => map.set(lo + idx, hex2str(it.slice(1, -1))));
+      }
+    }
+  }
+  return map;
+}
+// Extract positioned text items per page: [{page, x, y, text}]
+async function pdfExtractItems(buf) {
+  const bytes = new Uint8Array(buf);
+  const src = pdfLatin(bytes);
+  // Object map: objNum → { dict, streamBytes }
+  const objs = new Map();
+  const objRe = /(\d+)\s+0\s+obj\b/g;
+  const marks = [];
+  let m;
+  while ((m = objRe.exec(src))) marks.push({ num: parseInt(m[1], 10), start: m.index, bodyStart: objRe.lastIndex });
+  for (let i = 0; i < marks.length; i++) {
+    const end = i + 1 < marks.length ? marks[i + 1].start : src.length;
+    let body = src.slice(marks[i].bodyStart, end);
+    let streamBytes = null;
+    const sIdx = body.indexOf("stream");
+    if (sIdx !== -1) {
+      let dataStart = sIdx + 6;
+      if (body[dataStart] === "\r") dataStart++;
+      if (body[dataStart] === "\n") dataStart++;
+      const eIdx = body.indexOf("endstream", dataStart);
+      if (eIdx !== -1) {
+        streamBytes = bytes.subarray(marks[i].bodyStart + dataStart, marks[i].bodyStart + eIdx);
+        body = body.slice(0, sIdx);
+      }
+    }
+    objs.set(marks[i].num, { dict: body, streamBytes });
+  }
+  const getObj = n => objs.get(n);
+  const refOf = (dict, key) => {
+    const r = new RegExp("/" + key + "\\s+(\\d+)\\s+0\\s+R").exec(dict);
+    return r ? parseInt(r[1], 10) : null;
+  };
+  const pages = [];
+  for (const [num, o] of objs) {
+    if (/\/Type\s*\/Page[^s]/.test(o.dict + " ")) pages.push({ num, dict: o.dict });
+  }
+  async function fontsFor(dict) {
+    let resDict = dict;
+    const resRef = refOf(dict, "Resources");
+    if (resRef != null && !/\/Font/.test(dict)) resDict = (getObj(resRef) || { dict: "" }).dict;
+    const fm = /\/Font\s*<<([\s\S]*?)>>/.exec(resDict);
+    const fonts = new Map();
+    if (fm) {
+      const fr = /\/(\w+)\s+(\d+)\s+0\s+R/g;
+      let f;
+      while ((f = fr.exec(fm[1]))) {
+        const fobj = getObj(parseInt(f[2], 10));
+        if (!fobj) continue;
+        const tuRef = refOf(fobj.dict, "ToUnicode");
+        let cmap = null;
+        if (tuRef != null) {
+          const tu = getObj(tuRef);
+          if (tu && tu.streamBytes) {
+            try {
+              const dec = /FlateDecode/.test(tu.dict) ? await pdfInflate(tu.streamBytes) : tu.streamBytes;
+              cmap = pdfParseCMap(pdfLatin(dec));
+            } catch (e) { /* fall back to latin passthrough */ }
+          }
+        }
+        fonts.set(f[1], cmap);
+      }
+    }
+    return fonts;
+  }
+  function contentRefs(dict) {
+    const arr = /\/Contents\s*\[([\s\S]*?)\]/.exec(dict);
+    if (arr) {
+      const out = [];
+      const rr = /(\d+)\s+0\s+R/g;
+      let r;
+      while ((r = rr.exec(arr[1]))) out.push(parseInt(r[1], 10));
+      return out;
+    }
+    const single = refOf(dict, "Contents");
+    return single != null ? [single] : [];
+  }
+  const items = [];
+  for (let p = 0; p < pages.length; p++) {
+    const fonts = await fontsFor(pages[p].dict);
+    let content = "";
+    for (const ref of contentRefs(pages[p].dict)) {
+      const o = getObj(ref);
+      if (!o || !o.streamBytes) continue;
+      const dec = /FlateDecode/.test(o.dict) ? await pdfInflate(o.streamBytes) : o.streamBytes;
+      content += pdfLatin(dec) + "\n";
+    }
+    const tokRe = /<([0-9A-Fa-f\s]*)>|\(((?:\\.|[^\\()])*)\)|\[((?:<[0-9A-Fa-f\s]*>|\((?:\\.|[^\\()])*\)|[^\]])*)\]|\/(\w+)|(-?\d*\.?\d+)|([A-Za-z'"*]+)/g;
+    let tok;
+    const stack = [];
+    let nums = [], curFontMap = null, x = 0, y = 0, leading = 0;
+    let chunk = null;
+    const flush = () => { if (chunk && chunk.text.trim()) items.push(chunk); chunk = null; };
+    const decodeHex = h => {
+      const clean = h.replace(/\s+/g, "");
+      let out = "";
+      for (let i = 0; i + 2 <= clean.length; i += 2) {
+        const code = parseInt(clean.slice(i, i + 2), 16);
+        out += curFontMap && curFontMap.has(code) ? curFontMap.get(code) : String.fromCharCode(code);
+      }
+      return out;
+    };
+    const decodeLit = s => s.replace(/\\([nrtbf()\\]|\d{1,3})/g, (_, e) => {
+      if (e === "n") return "\n"; if (e === "r") return "\r"; if (e === "t") return "\t";
+      if (e === "b") return "\b"; if (e === "f") return "\f";
+      if (/\d/.test(e[0])) return String.fromCharCode(parseInt(e, 8));
+      return e;
+    });
+    const show = txt => {
+      if (!chunk) chunk = { page: p, x, y, text: "" };
+      chunk.text += txt;
+    };
+    while ((tok = tokRe.exec(content))) {
+      if (tok[1] !== undefined) { stack.push({ t: "hex", v: tok[1] }); continue; }
+      if (tok[2] !== undefined) { stack.push({ t: "lit", v: tok[2] }); continue; }
+      if (tok[3] !== undefined) { stack.push({ t: "arr", v: tok[3] }); continue; }
+      if (tok[4] !== undefined) { stack.push({ t: "name", v: tok[4] }); continue; }
+      if (tok[5] !== undefined) { nums.push(parseFloat(tok[5])); continue; }
+      const op = tok[6];
+      switch (op) {
+        case "Tf": {
+          const fname = stack.length ? stack[stack.length - 1].v : null;
+          curFontMap = fonts.get(fname) || null;
+          break;
+        }
+        case "Tm":
+          if (nums.length >= 6) {
+            flush();
+            x = nums[nums.length - 2];
+            y = nums[nums.length - 1];
+          }
+          break;
+        case "Td": case "TD":
+          if (nums.length >= 2) {
+            const dx = nums[nums.length - 2], dy = nums[nums.length - 1];
+            if (op === "TD") leading = -dy;
+            if (dy !== 0) { flush(); y += dy; x += dx; }
+            else x += dx;   // same visual line — text keeps appending to chunk
+          }
+          break;
+        case "TL": if (nums.length) leading = nums[nums.length - 1]; break;
+        case "T*": flush(); y += leading || 0; break;
+        case "BT": flush(); x = 0; y = 0; break;
+        case "ET": flush(); break;
+        case "Tj": case "'": case '"': {
+          const s = stack.pop();
+          if (s) show(s.t === "hex" ? decodeHex(s.v) : decodeLit(s.v));
+          break;
+        }
+        case "TJ": {
+          const s = stack.pop();
+          if (s && s.t === "arr") {
+            const partRe = /<([0-9A-Fa-f\s]*)>|\(((?:\\.|[^\\()])*)\)/g;
+            let q;
+            while ((q = partRe.exec(s.v))) show(q[1] !== undefined ? decodeHex(q[1]) : decodeLit(q[2]));
+          }
+          break;
+        }
+      }
+      nums = [];
+      stack.length = 0;
+    }
+    flush();
+  }
+  return items;
+}
+
+const INSP_HEADERS = ["Inspection Date", "Client", "Contact Details", "Vendor Notes", "Private Notes", "Property Address", "Rating", "Interest", "Price Guide"];
+
+// Reconstruct the Inspections Report table from positioned text items.
+// Records are anchored on date cells; a wrapped multi-line cell is vertically
+// centred so its first line can sit slightly ABOVE its date anchor — items
+// are assigned to the last anchor with anchor.y <= item.y + 6.
+function parseInspectionReport(items) {
+  const byPage = new Map();
+  for (const it of items) {
+    if (!byPage.has(it.page)) byPage.set(it.page, []);
+    byPage.get(it.page).push(it);
+  }
+  const records = [];
+  let agent = "";
+  let headerX = null;
+  for (const page of Array.from(byPage.keys()).sort((a, b) => a - b)) {
+    const pageItems = byPage.get(page).slice().sort((a, b) => (a.y - b.y) || (a.x - b.x));
+    let headerY = -Infinity;
+    {
+      const labelItems = pageItems.filter(c => INSP_HEADERS.includes(c.text.trim()));
+      const clientItem = labelItems.find(c => c.text.trim() === "Client");
+      if (clientItem) {
+        const hdr = labelItems.filter(c => Math.abs(c.y - clientItem.y) <= 2.5);
+        if (hdr.length >= 3) {
+          headerX = hdr.map(c => ({ label: c.text.trim(), x: c.x })).sort((a, b) => a.x - b.x);
+          headerY = clientItem.y;
+          // Agent name: nearest left-column line above the first header row.
+          if (!agent) {
+            let best = null;
+            for (const c of pageItems) {
+              if (c.y >= headerY - 2.5 || c.x > headerX[0].x + 30) continue;
+              const t = c.text.trim();
+              if (!/^[A-Za-z'’ .\-]{3,}$/.test(t)) continue;
+              if (/Lifestyle|Properties|Inspections?|Report|Average|Total|Agents?/i.test(t)) continue;
+              if (!best || c.y > best.y) best = c;
+            }
+            if (best) agent = best.text.trim();
+          }
+        }
+      }
+    }
+    if (!headerX) continue;   // summary page before any table
+    const colFor = xv => {
+      let best = null;
+      for (const h of headerX) if (xv >= h.x - 6) best = h.label;
+      return best;
+    };
+    const anchors = [];
+    for (const it of pageItems) {
+      if (it.y <= headerY + 2.5) continue;
+      if (colFor(it.x) === "Inspection Date" && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(it.text.trim())) {
+        const rec = { date: it.text.trim(), client: "", phone: "", property: "", interest: "", rating: "" };
+        anchors.push({ y: it.y, rec });
+        records.push(rec);
+      }
+    }
+    if (!anchors.length) continue;
+    for (const it of pageItems) {
+      if (it.y <= headerY + 2.5) continue;
+      const col = colFor(it.x);
+      if (!col || col === "Inspection Date") continue;
+      const text = it.text.trim();
+      if (!text || /^Page \d+ of \d+$/.test(text)) continue;
+      let rec = null;
+      for (const a of anchors) {
+        if (a.y <= it.y + 6) rec = a.rec;
+        else break;
+      }
+      if (!rec) continue;
+      if (col === "Client") rec.client += (rec.client ? " " : "") + text;
+      else if (col === "Contact Details") rec.phone += (rec.phone ? " " : "") + text;
+      else if (col === "Property Address") rec.property += (rec.property ? " " : "") + text;
+      else if (col === "Interest") rec.interest += (rec.interest ? " " : "") + text;
+      else if (col === "Rating") rec.rating += (rec.rating ? " " : "") + text;
+    }
+  }
+  for (const r of records) {
+    r.property = r.property.replace(/\s+/g, " ").trim();
+    r.client = r.client.replace(/\s+/g, " ").trim();
+  }
+  return { agent, records: records.filter(r => r.client) };
+}
+
+// Ingest an Inspections Report PDF: group records by (property, date) into
+// INSPECTIONS events with {name, phone} attendees. Re-importing the same
+// file replaces its prior events (idempotent, like the managed-CSV path).
+async function ingestInspectionPdf(file) {
+  const buf = await file.arrayBuffer();
+  const items = await pdfExtractItems(buf);
+  const { agent, records } = parseInspectionReport(items);
+  if (!records.length) throw new Error("No inspection rows found — is this an Inspections Report PDF?");
+  const before = INSPECTIONS.length;
+  INSPECTIONS = INSPECTIONS.filter(ev => ev.source !== file.name);
+  const replaced = before - INSPECTIONS.length;
+  const groups = new Map();   // property|dd/mm/yyyy → event under construction
+  for (const r of records) {
+    const key = r.property.toUpperCase() + "|" + r.date;
+    let g = groups.get(key);
+    if (!g) {
+      const dm = r.date.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      const iso = dm ? new Date(+dm[3], +dm[2] - 1, +dm[1], 12).toISOString() : new Date().toISOString();
+      g = { date: iso, property: r.property, agent: agent || "", source: file.name, attendees: [] };
+      groups.set(key, g);
+    }
+    g.attendees.push({ name: r.client, phone: r.phone });
+  }
+  const events = Array.from(groups.values()).sort((a, b) => (b.date < a.date ? -1 : 1));
+  for (const ev of events) {
+    ev.matches = matchAttendeeNames(ev.attendees.map(a => a.name));
+    INSPECTIONS.unshift(ev);
+  }
+  INSPECTIONS.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  saveInspections();
+  const strong = events.reduce((n, ev) => n + ev.matches.filter(m => m.tier === "strong").length, 0);
+  return { agent, rows: records.length, events: events.length, strong, replaced };
 }
 
 // Full recompute across all stored sale records → array of scored current-owner parcels.
@@ -1504,6 +1851,7 @@ function recompute(allSales, contacts = []) {
     p.enquiryDateStr = "";
     p.enquiryCount = 0;
     p.attendedInspection = false;
+    p.inspectionCount = 0;
     p.ownerWarm = false;
     p.ownerEnquiryContact = "";
     p.ownerEnquiryDateStr = "";
@@ -2271,6 +2619,7 @@ function warmTable(rows) {
       <td>${enquiryCell(p)}</td>
       <td>${esc(p.enquiryContact)} ${enquiryCountPill(p.enquiryCount)} ${inv} ${dncPill}</td>
       <td style="text-align:center;font-weight:600;">${p.enquiryCount || 1}</td>
+      <td style="text-align:center;font-weight:${p.inspectionCount ? 700 : 400};">${p.inspectionCount || ""}</td>
       <td>${esc(p.enquiryDateStr)}</td>
       <td>${esc(p.enquiryInterest)} ${p.enquiryInterestManaged ? `<span class="pill-um" title="We manage this property">OUR PM${p.enquiryInterestManagedPortfolio ? " · " + esc(p.enquiryInterestManagedPortfolio) : ""}</span>` : ""}</td>
       <td>${esc(p.enquiryInterestPriceFmt)}</td>
@@ -2292,6 +2641,7 @@ function warmTable(rows) {
       <th>Warm</th>
       <th data-table="warm" data-sort="enquiryContact" class="${sortClass(s,'enquiryContact')}">Enquirer${arrowFor(s,'enquiryContact')}</th>
       <th data-table="warm" data-sort="enquiryCount" class="${sortClass(s,'enquiryCount')}">Enq #${arrowFor(s,'enquiryCount')}</th>
+      <th data-table="warm" data-sort="inspectionCount" class="${sortClass(s,'inspectionCount')}">Insp #${arrowFor(s,'inspectionCount')}</th>
       <th data-table="warm" data-sort="enquiryDateMs" class="${sortClass(s,'enquiryDateMs')}">Enquiry Date${arrowFor(s,'enquiryDateMs')}</th>
       <th>Enquired On</th>
       <th data-table="warm" data-sort="enquiryInterestPrice" class="${sortClass(s,'enquiryInterestPrice')}">Buyer $$$${arrowFor(s,'enquiryInterestPrice')}</th>
@@ -2305,40 +2655,120 @@ function warmTable(rows) {
     </tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
+// V4.6 — Aggregate per-person inspection attendance across all saved events.
+// "Someone who keeps showing up at opens" is a true buyer/seller signal.
+function computeInspectors() {
+  const byPerson = new Map();
+  for (const ev of INSPECTIONS) {
+    const matchByName = new Map((ev.matches || []).map(m => [String(m.name).toUpperCase(), m]));
+    const ms = ev.date ? Date.parse(ev.date) || 0 : 0;
+    for (const a of (ev.attendees || [])) {
+      const name = attName(a);
+      if (!name) continue;
+      const k = name.toUpperCase();
+      let e = byPerson.get(k);
+      if (!e) {
+        e = { name, phone: "", inspCount: 0, props: new Set(), lastMs: 0, tier: "none", owner: "", ownedAddress: "", combinedScore: 0 };
+        byPerson.set(k, e);
+      }
+      e.inspCount++;
+      const ph = attPhone(a);
+      if (ph && !e.phone) e.phone = ph;
+      if (ev.property) e.props.add(ev.property);
+      if (ms > e.lastMs) e.lastMs = ms;
+      const m = matchByName.get(k);
+      if (m && (e.tier !== "strong")) {
+        e.tier = m.tier;
+        e.owner = m.owner || "";
+        e.ownedAddress = m.ownedAddress || "";
+        e.combinedScore = m.combinedScore || 0;
+      }
+    }
+  }
+  return Array.from(byPerson.values()).map(e => ({
+    ...e,
+    propCount: e.props.size,
+    propList: Array.from(e.props).join("; "),
+    lastDateStr: e.lastMs ? new Date(e.lastMs).toLocaleDateString("en-AU") : ""
+  }));
+}
+
+let INSPECTORS_SORT = { key: "inspCount", dir: "desc" };
+
+function inspectorsTable() {
+  let rows = computeInspectors();
+  if (!rows.length) return "";
+  rows = sortRows(rows, INSPECTORS_SORT.key, INSPECTORS_SORT.dir);
+  const s = INSPECTORS_SORT;
+  const body = rows.map(r => {
+    const cls = r.tier === "strong" ? "HIGH" : r.tier === "uncertain" ? "MEDIUM" : "NO";
+    const label = r.tier === "strong" ? "SC OWNER" : r.tier === "uncertain" ? "MAYBE" : "—";
+    return `<tr class="${r.tier === "strong" ? "s8" : ""}">
+      <td>${esc(r.name)} ${r.inspCount >= 2 ? `<span class="pill-repeat" title="${r.inspCount} inspections — hot prospect">🏠 ${r.inspCount}×</span>` : ""}</td>
+      <td style="text-align:center;font-weight:700;">${r.inspCount}</td>
+      <td style="text-align:center;">${r.propCount}</td>
+      <td>${esc(r.lastDateStr)}</td>
+      <td>${esc(r.phone)}</td>
+      <td><span class="grade ${cls}">${label}</span></td>
+      <td>${esc(r.owner)}</td>
+      <td>${esc(r.ownedAddress)}</td>
+      <td class="score">${r.combinedScore || ""}</td>
+      <td class="wrap" style="max-width:280px;white-space:normal;">${esc(r.propList)}</td>
+    </tr>`;
+  }).join("");
+  return `<h3 class="section">TOP INSPECTORS — every attendee across all saved inspections (click headers to sort)</h3>
+    <div class="table-scroll"><table>
+    <thead><tr>
+      <th data-table="inspectors" data-sort="name" class="${sortClass(s,'name')}">Name${arrowFor(s,'name')}</th>
+      <th data-table="inspectors" data-sort="inspCount" class="${sortClass(s,'inspCount')}">Insp #${arrowFor(s,'inspCount')}</th>
+      <th data-table="inspectors" data-sort="propCount" class="${sortClass(s,'propCount')}">Props Visited${arrowFor(s,'propCount')}</th>
+      <th data-table="inspectors" data-sort="lastMs" class="${sortClass(s,'lastMs')}">Last Inspection${arrowFor(s,'lastMs')}</th>
+      <th>Phone</th>
+      <th data-table="inspectors" data-sort="tier" class="${sortClass(s,'tier')}">Match${arrowFor(s,'tier')}</th>
+      <th>Owner (database)</th><th>SC Property Owned</th>
+      <th data-table="inspectors" data-sort="combinedScore" class="${sortClass(s,'combinedScore')}">Score${arrowFor(s,'combinedScore')}</th>
+      <th>Properties Visited</th>
+    </tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+}
+
 function inspectionsPanel() {
   if (!INSPECTIONS.length) {
-    return `<div class="empty"><p>No inspections saved yet.</p><p class="muted">Use the <b>Match Inspection List…</b> button at the top to capture an open-home attendee list (paste from an iPhone screenshot via Live Text) and match it against your database. Strong matches give the owner a +${CONFIG.inspection_boost || 3} score boost.</p></div>`;
+    return `<div class="empty"><p>No inspections saved yet.</p><p class="muted">Use <b>Import Inspections PDF…</b> to load an agent's Inspections Report straight from the CRM, or <b>Match Inspection List…</b> to capture an open-home attendee list from an iPhone screenshot (Live Text paste). Strong matches give the owner a +${CONFIG.inspection_boost || 3} score boost.</p></div>`;
   }
-  return INSPECTIONS.map((ev, i) => {
+  const events = INSPECTIONS.map((ev, i) => {
     const attendees = ev.attendees || [];
     const matches = ev.matches || [];
     const strong = matches.filter(m => m.tier === "strong").length;
     const maybe = matches.filter(m => m.tier === "uncertain").length;
     const date = ev.date ? new Date(ev.date).toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short" }) : "(no date)";
+    const phoneByName = new Map(attendees.map(a => [attName(a).toUpperCase(), attPhone(a)]));
     const rows = matches.map(m => {
       const cls = m.tier === "strong" ? "HIGH" : m.tier === "uncertain" ? "MEDIUM" : "NO";
       const label = m.tier === "strong" ? "MATCH" : m.tier === "uncertain" ? "MAYBE" : "no match";
       return `<tr>
         <td>${esc(m.name)}</td>
+        <td>${esc(phoneByName.get(String(m.name).toUpperCase()) || "")}</td>
         <td><span class="grade ${cls}">${label}</span></td>
         <td>${esc(m.owner || "")}</td>
         <td>${esc(m.ownedAddress || "")}</td>
         <td class="score">${m.combinedScore || ""}</td>
       </tr>`;
     }).join("");
-    return `<div style="background:#fff;border:1px solid var(--line);border-radius:6px;padding:14px;margin:12px 0;">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
-        <div><b>${esc(ev.property || "(no property recorded)")}</b> <span class="muted">· ${esc(date)}</span></div>
-        <div class="muted">${attendees.length} attendee${attendees.length === 1 ? "" : "s"} · ${strong} strong · ${maybe} maybe
-          <button data-del-inspection="${i}" class="danger" style="font-size:11px;padding:4px 8px;margin-left:8px;">Delete</button>
-        </div>
-      </div>
-      <div class="table-scroll" style="margin-top:10px;max-height:none;">
-        <table><thead><tr><th>Attendee (as listed)</th><th>Match</th><th>Owner (database)</th><th>SC property owned</th><th>Score</th></tr></thead>
+    return `<details style="background:#fff;border:1px solid var(--line);border-radius:6px;padding:10px 14px;margin:10px 0;">
+      <summary style="cursor:pointer;">
+        <b>${esc(ev.property || "(no property recorded)")}</b> <span class="muted">· ${esc(date)}${ev.agent ? " · " + esc(ev.agent) : ""}</span>
+        <span class="muted" style="margin-left:8px;">${attendees.length} attendee${attendees.length === 1 ? "" : "s"} · ${strong} strong · ${maybe} maybe</span>
+        <button data-del-inspection="${i}" class="danger" style="font-size:11px;padding:4px 8px;margin-left:8px;">Delete</button>
+      </summary>
+      <div class="table-scroll" style="margin-top:10px;max-height:50vh;">
+        <table><thead><tr><th>Attendee (as listed)</th><th>Phone</th><th>Match</th><th>Owner (database)</th><th>SC property owned</th><th>Score</th></tr></thead>
         <tbody>${rows}</tbody></table>
       </div>
-    </div>`;
+    </details>`;
   }).join("");
+  return inspectorsTable() +
+    `<h3 class="section">INSPECTION EVENTS (${INSPECTIONS.length})</h3>` + events;
 }
 
 function reviewTable(rows) {
@@ -2527,7 +2957,7 @@ const EXPORT_COLS = [
   ["enquiryInterest","Enquired On"],["enquiryInterestPriceFmt","Buyer $$$"],["enquiryInterestBracket","Buyer Bracket"],
   ["enquiryActiveBuyer","Active Buyer"],["enquiryPotentialInvestor","Potential Investor"],
   ["ownerWarm","Owner Warm Seller"],["ownerEnquiryContact","Owner Enquirer"],["ownerEnquiryCount","Owner Enq #"],
-  ["attendedInspection","Attended Open Home"],
+  ["attendedInspection","Attended Open Home"],["inspectionCount","Insp #"],
   ["knownToOffice","Known to Office"],["recentEnquiry","Recent Enquiry"],
   ["recommendedAction","Recommended Action"],
   ["fullAddress","Address"],["suburbName","Suburb"],["propertyType","Property Type"],
@@ -2548,7 +2978,7 @@ const WARM_COLS = [
   ["enquiryInterest","Enquired On"],["enquiryInterestPriceFmt","Buyer $$$"],["enquiryInterestBracket","Buyer Bracket"],
   ["enquiryActiveBuyer","Active Buyer"],["enquiryPotentialInvestor","Potential Investor"],
   ["enquiryInterestManaged","Enquired-On UM"],["enquiryInterestManagedPortfolio","UM Portfolio"],
-  ["attendedInspection","Attended Open Home"],
+  ["attendedInspection","Attended Open Home"],["inspectionCount","Insp #"],
   ["owner1","Owner (database)"],["fullAddress","SC Property Owned"],["suburbName","Suburb"],
   ["postalAddress","Postal Address"],["ownerNotes","Notes"],
   ["contactedCount","Contacted #"],["contactedLast","Last Contacted"],
@@ -2586,7 +3016,7 @@ const MANAGED_COLS = [
   ["enquiryInterest","Enquired On"],["enquiryInterestBracket","Buyer Bracket"],
   ["enquiryActiveBuyer","Active Buyer"],
   ["ownerWarm","Owner Warm Seller"],["ownerEnquiryContact","Owner Enquirer"],["ownerEnquiryCount","Owner Enq #"],
-  ["attendedInspection","Attended Open Home"],
+  ["attendedInspection","Attended Open Home"],["inspectionCount","Insp #"],
   ["owner1","Owner"],
   ["fullAddress","Address"],["suburbName","Suburb"],
   ["managedPortfolio","Portfolio"],["managedPropertyManager","Property Manager"],
@@ -2998,6 +3428,7 @@ function exportWorkbook() {
     (() => { const pm = portfolioMatrix(portfoliosInSuburb(subsetPortfolios())); return { name: "Portfolios", header: pm.header, rows: pm.data.map(r => r.map(cellValue)) }; })(),
     sheetFrom("All Properties", parcelsInSuburb(subsetAll()), EXPORT_COLS),
     sheetFrom("Holding Pending RP Data", holdingInBracket(holdingInSuburb(HOLDING)), HOLDING_COLS),
+    buildInspectorsSheet(),
     buildInspectionsSheet(),
     sheetFrom("Filtered Out", parcelsInSuburb(subsetFiltered()), FILTERED_COLS)
   ];
@@ -3007,18 +3438,21 @@ function exportWorkbook() {
   toast(`Exported workbook (${sheets.length} tabs)${subLabel()}${brLabel()} to Excel.`);
 }
 
-// V4.5 — Inspections workbook sheet: one row per attendee match across all
-// saved inspections, so it Excel-sorts and -filters the same as Warm Sellers.
+// V4.5/V4.6 — Inspections workbook sheet: one row per attendee match across
+// all saved inspections, so it Excel-sorts and -filters the same as Warm Sellers.
 function buildInspectionsSheet() {
-  const header = ["Inspection Date", "Property", "Attendee (as listed)", "Match", "Owner (database)", "SC Property Owned", "Score"];
+  const header = ["Inspection Date", "Property", "Agent", "Attendee (as listed)", "Phone", "Match", "Owner (database)", "SC Property Owned", "Score"];
   const rows = [];
   for (const ev of INSPECTIONS) {
     const date = ev.date ? new Date(ev.date).toLocaleString("en-AU", { dateStyle: "short", timeStyle: "short" }) : "";
+    const phoneByName = new Map((ev.attendees || []).map(a => [attName(a).toUpperCase(), attPhone(a)]));
     for (const m of (ev.matches || [])) {
       rows.push([
         date,
         ev.property || "",
+        ev.agent || "",
         m.name || "",
+        phoneByName.get(String(m.name).toUpperCase()) || "",
         m.tier === "strong" ? "MATCH" : m.tier === "uncertain" ? "MAYBE" : "no match",
         m.owner || "",
         m.ownedAddress || "",
@@ -3027,6 +3461,19 @@ function buildInspectionsSheet() {
     }
   }
   return { name: "Inspections", header, rows };
+}
+// V4.6 — Top Inspectors workbook sheet (per-person attendance roll-up,
+// most inspections first — matches the dashboard leaderboard).
+function buildInspectorsSheet() {
+  const header = ["Name", "Insp #", "Props Visited", "Last Inspection", "Phone", "Match", "Owner (database)", "SC Property Owned", "Score", "Properties Visited"];
+  const rows = computeInspectors()
+    .sort((a, b) => (b.inspCount - a.inspCount) || (b.lastMs - a.lastMs))
+    .map(r => [
+      r.name, r.inspCount, r.propCount, r.lastDateStr, r.phone,
+      r.tier === "strong" ? "SC OWNER" : r.tier === "uncertain" ? "MAYBE" : "",
+      r.owner, r.ownedAddress, r.combinedScore || "", r.propList
+    ]);
+  return { name: "Top Inspectors", header, rows };
 }
 
 /* ───────────────────────── UI wiring ───────────────────────── */
@@ -3153,10 +3600,11 @@ document.addEventListener("click", e => {
   const th = e.target.closest("th[data-table][data-sort]");
   if (!th) return;
   const tbl = th.dataset.table, key = th.dataset.sort;
-  const state = tbl === "warm" ? WARM_SORT : HOLDING_SORT;
+  const state = tbl === "warm" ? WARM_SORT : tbl === "inspectors" ? INSPECTORS_SORT : HOLDING_SORT;
   if (state.key === key) state.dir = state.dir === "asc" ? "desc" : "asc";
   else { state.key = key; state.dir = key === "name" ? "asc" : "desc"; }
   if (tbl === "warm") document.getElementById("panel-warm").innerHTML = warmTable(WARM);
+  else if (tbl === "inspectors") document.getElementById("panel-inspections").innerHTML = inspectionsPanel();
   else document.getElementById("panel-holding").innerHTML = holdingTable(HOLDING);
 });
 document.getElementById("markContactedBtn").addEventListener("click", () => {
@@ -3646,6 +4094,28 @@ function renderInspPreview(matches) {
 document.getElementById("matchInspectionBtn").addEventListener("click", () => {
   if (!DATASET.length) { toast("Drop an RP Data CSV first — nothing to match against."); return; }
   openInspectionModal();
+});
+document.getElementById("importInspPdfBtn").addEventListener("click", () => {
+  document.getElementById("inspPdfInput").click();
+});
+document.getElementById("inspPdfInput").addEventListener("change", async e => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = "";
+  if (!files.length) return;
+  for (const file of files) {
+    try {
+      toast(`Reading ${file.name}…`);
+      const r = await ingestInspectionPdf(file);
+      const repl = r.replaced ? ` (replaced ${r.replaced} prior event${r.replaced === 1 ? "" : "s"} from this file)` : "";
+      toast(`${file.name}: ${r.rows} inspections${r.agent ? " by " + r.agent : ""} → ${r.events} open home${r.events === 1 ? "" : "s"}, ${r.strong} SC-owner match${r.strong === 1 ? "" : "es"}${repl}.`);
+    } catch (err) {
+      toast(`Could not import ${file.name}: ${err.message}`);
+    }
+  }
+  await refresh();
+  await autosave();
+  const t = document.querySelector('.tab[data-tab="inspections"]');
+  if (t) t.click();
 });
 document.getElementById("inspCancelBtn").addEventListener("click", closeInspectionModal);
 document.getElementById("inspImage").addEventListener("change", e => {
