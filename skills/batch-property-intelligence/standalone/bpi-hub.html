@@ -217,7 +217,7 @@
     <h1>BATCH INTELLIGENCE HUB</h1>
     <div class="sub">Elite Lifestyle Properties — browser edition</div>
   </div>
-  <div class="sub" id="versionTag">V4.5 · 9 June 2026 · runs entirely on your machine · no data leaves the browser</div>
+  <div class="sub" id="versionTag">V4.5.1 · 10 June 2026 · runs entirely on your machine · no data leaves the browser</div>
 </header>
 
 <div id="lockShield" style="position:fixed;inset:0;background:var(--elite-black);color:var(--warm-white);z-index:9999;display:flex;align-items:center;justify-content:center;">
@@ -1010,18 +1010,13 @@ function applyRepeatEnquiryBoost(parcels) {
   for (const p of parcels) {
     if (!p.warmSeller || p.nonSaleable) continue;
     const cnt = p.enquiryCount || 1;
-    let extra = 0;
-    if (cnt >= 6) extra = 2;
-    else if (cnt >= 3) extra = 1;
-    if (extra > 0) {
-      const before = p.combinedScore;
-      p.combinedScore = Math.min(cap, p.combinedScore + extra);
-      p.repeatBoost = p.combinedScore - before;
-      if (p.repeatBoost > 0) {
-        p.recommendedAction = (p.recommendedAction || "") +
-          ` — repeat enquirer (${cnt}×).`;
-      }
-    }
+    const extra = cnt >= 6 ? 2 : cnt >= 3 ? 1 : 0;
+    if (!extra) continue;
+    const before = p.combinedScore;
+    p.combinedScore = Math.min(cap, p.combinedScore + extra);
+    p.repeatBoost = p.combinedScore - before;
+    // Append the reason whenever the predicate matches — even at score_cap.
+    p.recommendedAction = (p.recommendedAction || "") + ` — repeat enquirer (${cnt}×).`;
   }
 }
 function applyManagedBoost(parcels) {
@@ -1033,10 +1028,8 @@ function applyManagedBoost(parcels) {
     const before = p.combinedScore;
     p.combinedScore = Math.min(cap, p.combinedScore + boost);
     p.managedBoost = p.combinedScore - before;
-    if (p.managedBoost > 0) {
-      p.recommendedAction = (p.recommendedAction || "") +
-        ` — UM${p.managedPortfolio ? " · " + p.managedPortfolio : ""} · client.`;
-    }
+    p.recommendedAction = (p.recommendedAction || "") +
+      ` — UM${p.managedPortfolio ? " · " + p.managedPortfolio : ""} · client.`;
   }
 }
 function tierLabel(score) {
@@ -1048,41 +1041,53 @@ function tierLabel(score) {
 // V4.4 — Owners flagged in any saved inspection get a stronger-than-enquiry
 // boost: they physically attended an open home for one of our listings.
 function applyInspectionBoost(parcels) {
+  if (!INSPECTIONS.length) return;
+  // Attendance is a fact about the owner regardless of whether the boost is on,
+  // so the attended-open-home flag is always set; only the score arithmetic is
+  // gated on a non-zero boost weight.
   const boost = CONFIG.inspection_boost || 0;
-  if (!boost || !INSPECTIONS.length) return;
   const cap = CONFIG.score_cap || 20;
-  const ownersBoosted = new Set();
+  const ownersAttending = new Set();
   for (const ev of INSPECTIONS) {
     for (const m of (ev.matches || [])) {
-      if (m.tier === "strong" && m.owner) ownersBoosted.add(m.owner);
+      if (m.tier === "strong" && m.owner) ownersAttending.add(m.owner);
     }
   }
-  if (!ownersBoosted.size) return;
+  if (!ownersAttending.size) return;
   for (const p of parcels) {
-    if (p.nonSaleable || !ownersBoosted.has(p.owner1)) continue;
-    const before = p.combinedScore;
-    p.combinedScore = Math.min(cap, p.combinedScore + boost);
-    p.inspectionBoost = p.combinedScore - before;
+    if (!ownersAttending.has(p.owner1)) continue;
     p.attendedInspection = true;
-    if (p.inspectionBoost > 0) {
+    // recommendedAction reason text is appended whenever the predicate matches
+    // (even if the score is already capped); the boost arithmetic still respects
+    // the cap. Saleable + in-SC only — non-saleable parcels still get the
+    // attended flag for visibility on every tab.
+    if (p.nonSaleable) continue;
+    if (boost > 0) {
+      const before = p.combinedScore;
+      p.combinedScore = Math.min(cap, p.combinedScore + boost);
+      p.inspectionBoost = p.combinedScore - before;
       p.recommendedAction = (p.recommendedAction || "") + ` — attended open home.`;
     }
   }
 }
 
 // V4.4 — Lease end soon on a managed property = vendor often thinks about
-// selling. Parses a date out of the tenancy field; +N if within window.
-function parseDateLoose(s) {
+// selling. Pulls every date-shaped substring out of the (free-text) tenancy
+// field, picks the LATEST one (a tenancy string often carries a stale prior
+// lease before the current end), and reuses parseAnyDate so we accept ISO,
+// dd/mm/yyyy, "09 Nov 2026", and trailing time components consistently.
+function parseTenancyEndMs(s) {
   if (!s) return null;
-  const t = String(s).trim();
-  let m = t.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
-  if (m) return new Date(+m[1], +m[2] - 1, +m[3]).getTime();
-  m = t.match(/(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})/);
-  if (m) {
-    let y = +m[3]; if (y < 100) y += 2000;
-    return new Date(y, +m[2] - 1, +m[1]).getTime();
+  const t = String(s);
+  const tokens = t.match(/\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{1,2}\s+[A-Za-z]{3,}\s+\d{2,4}/g) || [];
+  let best = null;
+  for (const tok of tokens) {
+    const d = parseAnyDate(tok);
+    if (!d) continue;
+    const ms = d.getTime();
+    if (best === null || ms > best) best = ms;
   }
-  return null;
+  return best;
 }
 function applyLeaseExpiryBoost(parcels) {
   const days = CONFIG.lease_expiry_seller_boost_days || 0;
@@ -1093,17 +1098,16 @@ function applyLeaseExpiryBoost(parcels) {
   const now = Date.now();
   for (const p of parcels) {
     if (p.nonSaleable || !p.managedHere) continue;
-    const ms = parseDateLoose(p.managedTenancy);
-    if (!ms) continue;
+    const ms = parseTenancyEndMs(p.managedTenancy);
+    if (ms == null) continue;
     const delta = ms - now;
     if (delta < 0 || delta > cutoff) continue;
     const before = p.combinedScore;
     p.combinedScore = Math.min(cap, p.combinedScore + boost);
     p.leaseExpiryBoost = p.combinedScore - before;
-    if (p.leaseExpiryBoost > 0) {
-      const daysLeft = Math.max(0, Math.round(delta / 864e5));
-      p.recommendedAction = (p.recommendedAction || "") + ` — lease ends ${daysLeft}d.`;
-    }
+    const daysLeft = Math.max(0, Math.round(delta / 864e5));
+    // Append reason whenever the predicate matches, even at score_cap.
+    p.recommendedAction = (p.recommendedAction || "") + ` — lease ends ${daysLeft}d.`;
   }
 }
 
@@ -1118,9 +1122,8 @@ function applyActiveBuyerWarmBoost(parcels) {
     const before = p.combinedScore;
     p.combinedScore = Math.min(cap, p.combinedScore + boost);
     p.activeBuyerWarmBoost = p.combinedScore - before;
-    if (p.activeBuyerWarmBoost > 0) {
-      p.recommendedAction = (p.recommendedAction || "") + ` — active buyer.`;
-    }
+    // Append reason whenever the predicate matches, even at score_cap.
+    p.recommendedAction = (p.recommendedAction || "") + ` — active buyer.`;
   }
 }
 
@@ -2034,8 +2037,10 @@ function renderDashboard() {
   setCount("all", DATASET.length);
   setCount("filtered", filtered.length);
 
-  // Summary panel — Top 20 also warm-first
-  const top20 = sortByWarmEnquiry(DATASET).slice(0, 20);
+  // Summary's "Top 20 Scorers" honours the heading — pure combinedScore desc.
+  // (Warm-first ordering is the default on other tabs; this card is the
+  // canonical top-score reference.)
+  const top20 = DATASET.slice().sort((a, b) => (b.combinedScore || 0) - (a.combinedScore || 0)).slice(0, 20);
   const chartHTML = enquiryMomentumChart(ALL_CONTACTS);
   document.getElementById("panel-summary").innerHTML = `
     <h3 class="section">LEAD GRADE DISTRIBUTION</h3>
@@ -2154,14 +2159,17 @@ function enquiryCell(p) {
   return out;
 }
 // V4.5 — Compact per-row enquirer name + count, blank when no enquiry.
+// Both helpers take Math.max so a warm parcel whose owner has a higher
+// total elsewhere (e.g. they enquired 5× on parcel B, once on parcel A)
+// surfaces the owner-level count on every parcel — not just the heaviest.
 function enquirerNameCell(p) {
   const name = p.enquiryContact || p.ownerEnquiryContact || "";
   if (!name) return "";
-  const cnt = p.enquiryCount || p.ownerEnquiryCount || 0;
+  const cnt = enquiryCountNum(p);
   return esc(name) + (cnt >= 2 ? ` ${enquiryCountPill(cnt)}` : "");
 }
 function enquiryCountNum(p) {
-  return p.enquiryCount || p.ownerEnquiryCount || 0;
+  return Math.max(p.enquiryCount || 0, p.ownerEnquiryCount || 0);
 }
 // Used everywhere we want "warm sellers with most enquiries on top" as the
 // default order. The user's golden signal: an enquirer who also owns ≥1 SC
@@ -2302,10 +2310,12 @@ function inspectionsPanel() {
     return `<div class="empty"><p>No inspections saved yet.</p><p class="muted">Use the <b>Match Inspection List…</b> button at the top to capture an open-home attendee list (paste from an iPhone screenshot via Live Text) and match it against your database. Strong matches give the owner a +${CONFIG.inspection_boost || 3} score boost.</p></div>`;
   }
   return INSPECTIONS.map((ev, i) => {
-    const strong = (ev.matches || []).filter(m => m.tier === "strong").length;
-    const maybe = (ev.matches || []).filter(m => m.tier === "uncertain").length;
+    const attendees = ev.attendees || [];
+    const matches = ev.matches || [];
+    const strong = matches.filter(m => m.tier === "strong").length;
+    const maybe = matches.filter(m => m.tier === "uncertain").length;
     const date = ev.date ? new Date(ev.date).toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short" }) : "(no date)";
-    const rows = (ev.matches || []).map(m => {
+    const rows = matches.map(m => {
       const cls = m.tier === "strong" ? "HIGH" : m.tier === "uncertain" ? "MEDIUM" : "NO";
       const label = m.tier === "strong" ? "MATCH" : m.tier === "uncertain" ? "MAYBE" : "no match";
       return `<tr>
@@ -2319,7 +2329,7 @@ function inspectionsPanel() {
     return `<div style="background:#fff;border:1px solid var(--line);border-radius:6px;padding:14px;margin:12px 0;">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
         <div><b>${esc(ev.property || "(no property recorded)")}</b> <span class="muted">· ${esc(date)}</span></div>
-        <div class="muted">${ev.attendees.length} attendee${ev.attendees.length === 1 ? "" : "s"} · ${strong} strong · ${maybe} maybe
+        <div class="muted">${attendees.length} attendee${attendees.length === 1 ? "" : "s"} · ${strong} strong · ${maybe} maybe
           <button data-del-inspection="${i}" class="danger" style="font-size:11px;padding:4px 8px;margin-left:8px;">Delete</button>
         </div>
       </div>
@@ -2588,7 +2598,8 @@ const MANAGED_COLS = [
 // dynamically: one "SC Property N" column per holding (widest owner sets N),
 // plus a Postal Address column (blank unless the export carried one).
 function portfolioMatrix(rows) {
-  rows = sortByWarmEnquiry(rows);
+  // Trust caller's order — subsetPortfolios sorts by ownerPropertyCount desc
+  // (biggest portfolio first), which is the whole point of this tab.
   const maxProps = rows.reduce((m, r) => Math.max(m, (r.ownerPropertyList || []).length), 0);
   const header = ["Enq #", "Warm Enquirer", "Enquiry Date", "Owner", "Class", "Properties", "Rentals", "Postal Address", "Profile"];
   for (let i = 1; i <= maxProps; i++) header.push("SC Property " + i);
@@ -2608,7 +2619,8 @@ function portfolioMatrix(rows) {
 // Rentals rollup: top score + landlord + a separate Suburbs column + one
 // "Rental Property N" column per rental (widest landlord sets N).
 function rentalsMatrix(rows) {
-  rows = sortByWarmEnquiry(rows);
+  // Trust caller's order — subsetRentalLandlords sorts by rentalTopScore desc
+  // then rentalCount desc, which matches the leftmost Top Score column.
   const maxR = rows.reduce((m, r) => Math.max(m, (r.ownerRentalList || []).length), 0);
   const header = ["Top Score", "Enq #", "Warm Enquirer", "Enquiry Date", "Owner", "Class", "Owner Type", "Rentals", "Suburbs", "Postal Address"];
   for (let i = 1; i <= maxR; i++) header.push("Rental Property " + i);
@@ -3322,13 +3334,16 @@ async function writeDBFile(handle) {
 async function readDBFile(handle) {
   const file = await handle.getFile();
   const text = await file.text();
-  if (!text.trim()) return { sales: [], contacts: [], runs: { count: 0, files: [] }, config: null, decisions: null, manual: null, managed: null, inspections: null };
+  if (!text.trim()) return { sales: [], contacts: [], runs: { count: 0, files: [] }, config: null, decisions: null, manual: null, managed: null, inspections: [] };
   const data = JSON.parse(text);
   return {
     sales: data.sales || [], contacts: data.contacts || [], runs: data.runs || { count: 0, files: [] },
     config: data.config || null, decisions: data.decisions || null,
     manual: data.manual || null, managed: data.managed || null,
-    inspections: data.inspections || null
+    // Always present; a legacy v5 snapshot without the field becomes [] so a
+    // 'Load a copy' rollback clears stale in-memory inspections instead of
+    // silently re-applying them against the loaded dataset.
+    inspections: Array.isArray(data.inspections) ? data.inspections : []
   };
 }
 // Apply config + match decisions + manual enrichment + managed list + inspections loaded from memory.
@@ -3349,6 +3364,9 @@ function applyLoadedExtras(config, decisions, manual, managed, inspections) {
     MANAGED = { byOwner: managed.byOwner || {}, byAddressKey: managed.byAddressKey || {}, pmPortfolioMap: managed.pmPortfolioMap || {} };
     saveManaged();
   }
+  // inspections is now always an array (readDBFile / loadCopyFile normalise to []),
+  // so a loaded v5 snapshot replaces in-memory INSPECTIONS with empty rather
+  // than silently keeping the previous dataset's attendance history.
   if (Array.isArray(inspections)) {
     INSPECTIONS = inspections;
     saveInspections();
@@ -3486,7 +3504,13 @@ function loadCopy() { document.getElementById("loadCopyInput").click(); }
 async function loadCopyFile(file) {
   try {
     const data = JSON.parse(await file.text());
-    applyLoadedExtras(data.config || null, data.decisions || null, data.manual || null, data.managed || null, data.inspections || null);
+    applyLoadedExtras(
+      data.config || null,
+      data.decisions || null,
+      data.manual || null,
+      data.managed || null,
+      Array.isArray(data.inspections) ? data.inspections : []
+    );
     await replaceAll(data.sales || [], data.contacts || [], data.runs || { count: 0, files: [] });
     await refresh();
     await autosave();
@@ -3582,19 +3606,31 @@ document.getElementById("savePasscodeBtn").addEventListener("click", async () =>
 
 /* ───────────────────────── V4.4 — Inspection list modal ───────────────────────── */
 
+// Track the screenshot blob URL so we can revoke it (multi-MB iPhone images
+// otherwise leak each time the user re-picks or closes the modal).
+let INSP_PREVIEW_URL = null;
+function clearInspPreview() {
+  const preview = document.getElementById("inspPreview");
+  if (INSP_PREVIEW_URL) {
+    URL.revokeObjectURL(INSP_PREVIEW_URL);
+    INSP_PREVIEW_URL = null;
+  }
+  preview.src = "";
+  preview.style.display = "none";
+}
 function openInspectionModal() {
   document.getElementById("inspectionModal").classList.add("show");
   document.getElementById("inspProperty").value = "";
   document.getElementById("inspNames").value = "";
   document.getElementById("inspPreviewResults").innerHTML = "";
-  const preview = document.getElementById("inspPreview");
-  preview.src = ""; preview.style.display = "none";
+  clearInspPreview();
   document.getElementById("inspImage").value = "";
   const d = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
   document.getElementById("inspDate").value = d.toISOString().slice(0, 16);
 }
 function closeInspectionModal() {
   document.getElementById("inspectionModal").classList.remove("show");
+  clearInspPreview();
 }
 function renderInspPreview(matches) {
   const host = document.getElementById("inspPreviewResults");
@@ -3615,8 +3651,11 @@ document.getElementById("inspCancelBtn").addEventListener("click", closeInspecti
 document.getElementById("inspImage").addEventListener("change", e => {
   const f = e.target.files[0];
   const preview = document.getElementById("inspPreview");
+  // Always revoke the previous URL before assigning a new one.
+  if (INSP_PREVIEW_URL) { URL.revokeObjectURL(INSP_PREVIEW_URL); INSP_PREVIEW_URL = null; }
   if (!f) { preview.style.display = "none"; preview.src = ""; return; }
-  preview.src = URL.createObjectURL(f);
+  INSP_PREVIEW_URL = URL.createObjectURL(f);
+  preview.src = INSP_PREVIEW_URL;
   preview.style.display = "block";
   setTimeout(() => document.getElementById("inspNames").focus(), 100);
 });
