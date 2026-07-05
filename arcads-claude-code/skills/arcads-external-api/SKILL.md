@@ -111,7 +111,7 @@ total_credits ≈ sum(credits_per_model × variations_requested) for each model
 Estimated credit cost:
   Seedance 2.0 (15s i2v) × 1 = ~0.9 credits   (from logs/arcads-api.jsonl 2026-04-09)
   Veo 3.1                × 2 = ~8 credits     (from MASTER_CONTEXT.md)
-  ──────────────────────────────
+  ─────────────────────────────
   Estimated total: ~8.9 credits
 
 ⚠️ Estimate only — confirm exact cost in the Arcads platform before proceeding.

@@ -343,7 +343,7 @@ Follow the main SKILL.md's mandatory estimation flow:
 Estimated credit cost:
   Seedance 2.0 (15s i2v) × 1 clip × 1 variation = ~0.9 credits
     (from logs/arcads-api.jsonl 2026-04-09)
-  ──────────────────────────────────────
+  ─────────────────────────────────────
   Estimated total: ~0.9 credits
 
   ⚠️ Estimate only — confirm exact cost in the Arcads platform.

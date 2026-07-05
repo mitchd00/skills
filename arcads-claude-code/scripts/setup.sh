@@ -29,7 +29,7 @@ mask_secret() {
   fi
 }
 
-# ── Step 1: .env ───────────────────────────────────────────────────────────────
+# ── Step 1: .env ──────────────────────────────────────────────────────────────
 if [[ ! -f "$ROOT/.env" ]]; then
   cp "$ROOT/.env.example" "$ROOT/.env"
   echo "Created .env from template."
@@ -114,7 +114,7 @@ fi
 
 echo ""
 
-# ── Step 2: MASTER_CONTEXT.md ─────────────────────────────────────────────────
+# ── Step 2: MASTER_CONTEXT.md ────────────────────────────────────────────────
 if [[ ! -f "$ROOT/MASTER_CONTEXT.md" ]]; then
   cp "$ROOT/MASTER_CONTEXT.template.md" "$ROOT/MASTER_CONTEXT.md"
   echo "Created MASTER_CONTEXT.md from template."
@@ -130,7 +130,7 @@ echo ""
 
 echo ""
 
-# ── Step 4: Verify API connectivity ─────────────────────────────────────────
+# ── Step 4: Verify API connectivity ──────────────────────────────────────────
 if grep -q "your_base64_encoded_credentials_here" "$ROOT/.env" 2>/dev/null || grep -q "your_key_here" "$ROOT/.env" 2>/dev/null; then
   echo "Credentials not yet set in .env — skipping connectivity check."
   echo "Run ./scripts/check-arcads-env.sh after adding your credentials."

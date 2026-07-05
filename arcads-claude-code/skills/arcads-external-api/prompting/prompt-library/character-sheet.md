@@ -162,7 +162,7 @@ Files are zero-padded and named by angle:
 ```
 Hero image:     1 × Nano Banana 2 = 0.03 credits
 9 angle images: 9 × Nano Banana 2 = 0.27 credits
-─────────────────────────────────────────────────
+────────────────────────────────────────────────
 Total:          10 generations     = 0.30 credits
 ```
 
