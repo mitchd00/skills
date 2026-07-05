@@ -30,7 +30,6 @@ mask_secret() {
 }
 
 # ── Step 1: .env ───────────────────────────────────────────────────────────────
-# shellcheck disable=SC1091
 if [[ ! -f "$ROOT/.env" ]]; then
   cp "$ROOT/.env.example" "$ROOT/.env"
   echo "Created .env from template."
@@ -116,7 +115,6 @@ fi
 echo ""
 
 # ── Step 2: MASTER_CONTEXT.md ─────────────────────────────────────────────────
-# shellcheck disable=SC1091
 if [[ ! -f "$ROOT/MASTER_CONTEXT.md" ]]; then
   cp "$ROOT/MASTER_CONTEXT.template.md" "$ROOT/MASTER_CONTEXT.md"
   echo "Created MASTER_CONTEXT.md from template."
