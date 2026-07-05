@@ -51,5 +51,20 @@
         "./skills/claude-api"
       ]
     }
+    ,
+    {
+      "name": "arcads-skills",
+      "description": "Arcads generative-ad production skill pack: AI image/video ad generation, YouTube thumbnails, ad cloning, and Meta ad publishing via the Arcads API",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./arcads-claude-code/skills/arcads-external-api",
+        "./arcads-claude-code/skills/chatgpt-image-ad",
+        "./arcads-claude-code/skills/nano-banana-image-ad",
+        "./arcads-claude-code/skills/image-ad-clone",
+        "./arcads-claude-code/skills/generate-youtube-thumbnail",
+        "./arcads-claude-code/shared/skills/meta-ad-builder"
+      ]
+    }
   ]
 }
