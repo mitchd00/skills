@@ -223,4 +223,3 @@ Sora 2's `refImageAsBase64` is a **style/mood reference**, not a literal startin
 - You need longer duration (up to 20s) and don't need exact frame-one fidelity
 - You're generating from a text prompt only (no starting frame)
 - The image is meant as a style reference, not a literal reproduction
-```
