@@ -319,4 +319,3 @@ product announcement that commands attention through simplicity.
 - [ ] **Word count** — prompt between 100–260 words
 - [ ] **@(img1)** — product image reference included
 - [ ] **No forbidden words** — no "cinematic" (use "dramatic" or "premium"), no "8k," "studio," "perfect"
-```
