@@ -25,6 +25,8 @@ Many skills in this repo are open source (Apache 2.0). We've also included the d
 - [./skills](./skills): Skill examples for Creative & Design, Development & Technical, Enterprise & Communication, and Document Skills
 - [./spec](./spec): The Agent Skills specification
 - [./template](./template): Skill template
+- [./arcads-claude-code](./arcads-claude-code): Arcads generative-ad production skill pack (AI image/video ad generation, YouTube thumbnails, ad cloning, Meta ad publishing). Registered as the `arcads-skills` plugin in the marketplace.
+- [./ruflo](./ruflo): Install + usage docs for [Ruflo](https://github.com/ruvnet/ruflo), a multi-agent orchestration harness for Claude Code (installed via `npm i -g ruflo`).
 
 # Try in Claude Code, Claude.ai, and the API
 
