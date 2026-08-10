@@ -217,7 +217,7 @@
     <h1>BATCH INTELLIGENCE HUB</h1>
     <div class="sub">Elite Lifestyle Properties — browser edition</div>
   </div>
-  <div class="sub" id="versionTag">V4.7 · 10 June 2026 · runs entirely on your machine · no data leaves the browser</div>
+  <div class="sub" id="versionTag">V4.8 · 11 August 2026 · runs entirely on your machine · no data leaves the browser</div>
 </header>
 
 <div id="lockShield" style="position:fixed;inset:0;background:var(--elite-black);color:var(--warm-white);z-index:9999;display:flex;align-items:center;justify-content:center;">
@@ -1694,9 +1694,13 @@ async function pdfExtractItems(buf) {
   return items;
 }
 
-const INSP_HEADERS = ["Inspection Date", "Client", "Contact Details", "Vendor Notes", "Private Notes", "Property Address", "Rating", "Interest", "Price Guide"];
+const INSP_HEADERS = ["Inspection Date", "Client", "Contact Details", "Vendor Notes", "Private Notes", "Property Address", "Agent name", "Rating", "Interest", "Price Guide"];
 
 // Reconstruct the Inspections Report table from positioned text items.
+// Handles BOTH report layouts:
+//  A) agent-grouped   — one section per agent, "Property Address" column per row
+//  B) property-grouped — one section PER PROPERTY (the address is the section
+//     title), "Agent name" column per row, repeated header per section.
 // Records are anchored on date cells; a wrapped multi-line cell is vertically
 // centred so its first line can sit slightly ABOVE its date anchor — items
 // are assigned to the last anchor with anchor.y <= item.y + 6.
@@ -1706,57 +1710,88 @@ function parseInspectionReport(items) {
     if (!byPage.has(it.page)) byPage.set(it.page, []);
     byPage.get(it.page).push(it);
   }
+  // Layout mode from the summary line: "N agents with M inspections" vs
+  // "N properties with M inspections".
+  const allText = items.map(i => i.text).join("\n");
+  const propertyGrouped = /propert(?:y|ies) with\s+\d+\s+inspections/i.test(allText);
+
   const records = [];
-  let agent = "";
-  let headerX = null;
+  let fileAgent = "";        // agent-grouped: section title = the agent
+  let curTitle = "";         // current section title (persists across pages)
+  let colX = null;           // current column map (persists across pages)
+
+  const isFurniture = t =>
+    !t || /^Page \d+ of \d+$/.test(t) || /^\d+\s+Inspections?$/.test(t) ||
+    /^(Inspections Report|Inspection Date - |ELITE Lifestyle Properties)$/.test(t) ||
+    /^\d+\s+(?:agents?|propert(?:y|ies))\s+with\s+\d+\s+inspections/i.test(t);
+
   for (const page of Array.from(byPage.keys()).sort((a, b) => a - b)) {
     const pageItems = byPage.get(page).slice().sort((a, b) => (a.y - b.y) || (a.x - b.x));
-    let headerY = -Infinity;
-    {
-      const labelItems = pageItems.filter(c => INSP_HEADERS.includes(c.text.trim()));
-      const clientItem = labelItems.find(c => c.text.trim() === "Client");
-      if (clientItem) {
-        const hdr = labelItems.filter(c => Math.abs(c.y - clientItem.y) <= 2.5);
-        if (hdr.length >= 3) {
-          headerX = hdr.map(c => ({ label: c.text.trim(), x: c.x })).sort((a, b) => a.x - b.x);
-          headerY = clientItem.y;
-          // Agent name: nearest left-column line above the first header row.
-          if (!agent) {
-            let best = null;
-            for (const c of pageItems) {
-              if (c.y >= headerY - 2.5 || c.x > headerX[0].x + 30) continue;
-              const t = c.text.trim();
-              if (!/^[A-Za-z'’ .\-]{3,}$/.test(t)) continue;
-              if (/Lifestyle|Properties|Inspections?|Report|Average|Total|Agents?/i.test(t)) continue;
-              if (!best || c.y > best.y) best = c;
-            }
-            if (best) agent = best.text.trim();
-          }
-        }
+    // All header rows on this page (a page can hold several sections).
+    const labelItems = pageItems.filter(c => INSP_HEADERS.includes(c.text.trim()));
+    const headerRows = [];
+    for (const li of labelItems.filter(c => c.text.trim() === "Client")) {
+      const band = labelItems.filter(c => Math.abs(c.y - li.y) <= 2.5);
+      if (band.length >= 3) {
+        headerRows.push({
+          y: li.y,
+          cols: band.map(c => ({ label: c.text.trim(), x: c.x })).sort((a, b) => a.x - b.x)
+        });
       }
     }
-    if (!headerX) continue;   // summary page before any table
-    const colFor = xv => {
+    headerRows.sort((a, b) => a.y - b.y);
+    // Section title for each header row: nearest left-column line in the
+    // 45px band above it (skip furniture). Missing → section continues.
+    for (const hr of headerRows) {
       let best = null;
-      for (const h of headerX) if (xv >= h.x - 6) best = h.label;
+      for (const c of pageItems) {
+        if (c.y >= hr.y - 2.5 || c.y < hr.y - 45) continue;
+        if (c.x > hr.cols[0].x + 30) continue;
+        const t = c.text.trim();
+        if (isFurniture(t)) continue;
+        if (!best || c.y > best.y) best = c;
+      }
+      hr.title = best ? best.text.trim() : null;
+    }
+    const headerBandAt = yv => headerRows.some(hr => Math.abs(hr.y - yv) <= 2.5);
+    const colMapAt = yv => {
+      let map = colX;
+      for (const hr of headerRows) if (hr.y <= yv + 2.5) map = hr.cols;
+      return map;
+    };
+    const titleAt = yv => {
+      let t = curTitle;
+      for (const hr of headerRows) if (hr.y <= yv + 2.5 && hr.title) t = hr.title;
+      return t;
+    };
+    const colFor = (map, xv) => {
+      if (!map) return null;
+      let best = null;
+      for (const h of map) if (xv >= h.x - 6) best = h.label;
       return best;
     };
+    // First pass: date anchors (with the section title active at that y).
     const anchors = [];
     for (const it of pageItems) {
-      if (it.y <= headerY + 2.5) continue;
-      if (colFor(it.x) === "Inspection Date" && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(it.text.trim())) {
-        const rec = { date: it.text.trim(), client: "", phone: "", property: "", interest: "", rating: "" };
-        anchors.push({ y: it.y, rec });
-        records.push(rec);
-      }
+      if (headerBandAt(it.y)) continue;
+      const map = colMapAt(it.y);
+      if (!map) continue;                       // before the first header ever seen
+      if (colFor(map, it.x) !== "Inspection Date") continue;
+      const t = it.text.trim();
+      if (!/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(t)) continue;
+      const rec = { date: t, client: "", phone: "", property: "", agentCol: "", interest: "", rating: "", sectionTitle: titleAt(it.y) };
+      anchors.push({ y: it.y, rec });
+      records.push(rec);
     }
-    if (!anchors.length) continue;
+    // Second pass: assign the remaining cells to the nearest anchor above.
     for (const it of pageItems) {
-      if (it.y <= headerY + 2.5) continue;
-      const col = colFor(it.x);
+      if (headerBandAt(it.y)) continue;
+      const map = colMapAt(it.y);
+      if (!map) continue;
+      const col = colFor(map, it.x);
       if (!col || col === "Inspection Date") continue;
       const text = it.text.trim();
-      if (!text || /^Page \d+ of \d+$/.test(text)) continue;
+      if (isFurniture(text)) continue;
       let rec = null;
       for (const a of anchors) {
         if (a.y <= it.y + 6) rec = a.rec;
@@ -1766,15 +1801,36 @@ function parseInspectionReport(items) {
       if (col === "Client") rec.client += (rec.client ? " " : "") + text;
       else if (col === "Contact Details") rec.phone += (rec.phone ? " " : "") + text;
       else if (col === "Property Address") rec.property += (rec.property ? " " : "") + text;
+      else if (col === "Agent name") rec.agentCol += (rec.agentCol ? " " : "") + text;
       else if (col === "Interest") rec.interest += (rec.interest ? " " : "") + text;
       else if (col === "Rating") rec.rating += (rec.rating ? " " : "") + text;
     }
+    // Persist section state across the page boundary.
+    if (headerRows.length) {
+      colX = headerRows[headerRows.length - 1].cols;
+      const lastTitled = headerRows.filter(hr => hr.title).pop();
+      if (lastTitled) curTitle = lastTitled.title;
+      if (!fileAgent && headerRows[0].title) fileAgent = headerRows[0].title;
+    }
   }
+  // Resolve per-record property + agent by layout mode.
   for (const r of records) {
-    r.property = r.property.replace(/\s+/g, " ").trim();
     r.client = r.client.replace(/\s+/g, " ").trim();
+    r.property = r.property.replace(/\s+/g, " ").trim();
+    if (propertyGrouped) {
+      r.property = (r.sectionTitle || "").trim();
+      r.agent = r.agentCol.replace(/\s+/g, " ").trim();
+    } else {
+      r.agent = fileAgent;
+    }
+    delete r.sectionTitle;
+    delete r.agentCol;
   }
-  return { agent, records: records.filter(r => r.client) };
+  return {
+    agent: propertyGrouped ? "" : fileAgent,
+    propertyGrouped,
+    records: records.filter(r => r.client)
+  };
 }
 
 // Ingest an Inspections Report PDF: group records by (property, date) into
@@ -1783,7 +1839,7 @@ function parseInspectionReport(items) {
 async function ingestInspectionPdf(file) {
   const buf = await file.arrayBuffer();
   const items = await pdfExtractItems(buf);
-  const { agent, records } = parseInspectionReport(items);
+  const { agent, propertyGrouped, records } = parseInspectionReport(items);
   if (!records.length) throw new Error("No inspection rows found — is this an Inspections Report PDF?");
   const before = INSPECTIONS.length;
   INSPECTIONS = INSPECTIONS.filter(ev => ev.source !== file.name);
@@ -1795,20 +1851,29 @@ async function ingestInspectionPdf(file) {
     if (!g) {
       const dm = r.date.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
       const iso = dm ? new Date(+dm[3], +dm[2] - 1, +dm[1], 12).toISOString() : new Date().toISOString();
-      g = { date: iso, property: r.property, agent: agent || "", source: file.name, attendees: [] };
+      g = { date: iso, property: r.property, agent: "", source: file.name, attendees: [], agentTally: new Map() };
       groups.set(key, g);
     }
     g.attendees.push({ name: r.client, phone: r.phone });
+    // In the property-grouped report the agent varies per row; the event
+    // shows the agent who ran the most inspections at that open.
+    const a = r.agent || agent || "";
+    if (a) g.agentTally.set(a, (g.agentTally.get(a) || 0) + 1);
   }
-  const events = Array.from(groups.values()).sort((a, b) => (b.date < a.date ? -1 : 1));
+  const events = Array.from(groups.values());
   for (const ev of events) {
+    let bestAgent = "", bestN = 0;
+    for (const [a, n] of ev.agentTally) if (n > bestN) { bestAgent = a; bestN = n; }
+    ev.agent = bestAgent;
+    delete ev.agentTally;
     ev.matches = matchAttendeeNames(ev.attendees.map(a => a.name));
     INSPECTIONS.unshift(ev);
   }
   INSPECTIONS.sort((a, b) => String(b.date).localeCompare(String(a.date)));
   saveInspections();
   const strong = events.reduce((n, ev) => n + ev.matches.filter(m => m.tier === "strong").length, 0);
-  return { agent, rows: records.length, events: events.length, strong, replaced };
+  const props = new Set(events.map(ev => ev.property.toUpperCase())).size;
+  return { agent, propertyGrouped, properties: props, rows: records.length, events: events.length, strong, replaced };
 }
 
 // Full recompute across all stored sale records → array of scored current-owner parcels.
@@ -4155,7 +4220,8 @@ document.getElementById("inspPdfInput").addEventListener("change", async e => {
       toast(`Reading ${file.name}…`);
       const r = await ingestInspectionPdf(file);
       const repl = r.replaced ? ` (replaced ${r.replaced} prior event${r.replaced === 1 ? "" : "s"} from this file)` : "";
-      toast(`${file.name}: ${r.rows} inspections${r.agent ? " by " + r.agent : ""} → ${r.events} open home${r.events === 1 ? "" : "s"}, ${r.strong} SC-owner match${r.strong === 1 ? "" : "es"}${repl}.`);
+      const scope = r.propertyGrouped ? ` across ${r.properties} propert${r.properties === 1 ? "y" : "ies"}` : (r.agent ? " by " + r.agent : "");
+      toast(`${file.name}: ${r.rows} inspections${scope} → ${r.events} open home${r.events === 1 ? "" : "s"}, ${r.strong} SC-owner match${r.strong === 1 ? "" : "es"}${repl}.`);
     } catch (err) {
       toast(`Could not import ${file.name}: ${err.message}`);
     }

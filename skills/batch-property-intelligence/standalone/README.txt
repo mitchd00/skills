@@ -1,5 +1,28 @@
-BATCH INTELLIGENCE HUB — Browser Edition  (V4.7)
+BATCH INTELLIGENCE HUB — Browser Edition  (V4.8)
 Elite Lifestyle Properties
+
+V4.8 — Property-grouped Inspections Report supported.
+
+The office-wide "Inspections Report" (grouped BY PROPERTY, with
+each address as a section heading and an Agent-name column per
+row) now imports through the same "Import Inspections PDF…"
+button. The Hub auto-detects which layout it's looking at from
+the report's summary line:
+- "N agents with M inspections"      → agent-grouped (existing)
+- "N properties with M inspections"  → property-grouped (new)
+
+In property-grouped mode the inspected property comes from the
+section heading, and the per-row agent is captured; each
+open-home event shows the agent who ran the most inspections at
+that session. Tested against a real office report: 690/690
+rows across 42 properties → 273 open-home events, 8 agents,
+550 unique people, 92 repeat inspectors.
+
+Everything downstream is unchanged: attendees match against
+current SC owners, matches are noted against the owner
+("inspected our listing N× & owns SC — potential seller",
+scaled score boost, 🏠 pills, Insp # columns, Top Inspectors
+leaderboard, workbook sheets).
 
 V4.7 — Inspections stamped against the person; scaled warmth.
 
