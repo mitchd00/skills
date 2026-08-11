@@ -1,0 +1,35 @@
+# Real RP Data CSVs — never committed
+inputs/*.csv
+
+# Run outputs
+outputs/*.xlsx
+outputs/*.html
+outputs/Archive/
+
+# Hub state
+data/*.sqlite
+data/*.sqlite-journal
+data/*.sqlite-wal
+data/*.sqlite-shm
+data/*.log
+data/*.pid
+data/status.json
+
+# Python build artefacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/*/
+!build/bpi-launcher.spec
+!build/build-windows-exe.ps1
+dist/
+
+# Test cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor
+.vscode/
+.idea/
